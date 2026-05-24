@@ -254,7 +254,19 @@ class {
                 // Per-phase: help content, static assets.
                 helpSections            : [],
                 helpPages               : [],
-                assets                  : []
+                // Static assets registered for the agent surface
+                // (board page). The host's AddonAssetService emits
+                // <link> / <script> tags into the Agent layout's
+                // <head> and pre-</body> slots.
+                //
+                // SortableJS is vendored under resources/vendor/ so
+                // the add-on is self-contained; board.js + board.css
+                // are PM's own.
+                assets : [
+                    { kind : "css", surface : "agent", href : "/modules/tesserabx-pm/resources/css/board.css",                       sortWeight : 500 },
+                    { kind : "js",  surface : "agent", src  : "/modules/tesserabx-pm/resources/vendor/sortablejs-1.15.6/Sortable.min.js", sortWeight : 400 },
+                    { kind : "js",  surface : "agent", src  : "/modules/tesserabx-pm/resources/js/board.js",                          sortWeight : 500, defer : true }
+                ]
             }
         };
 

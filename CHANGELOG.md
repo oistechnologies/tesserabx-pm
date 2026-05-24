@@ -6,6 +6,20 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 3b: CBWire Kanban + Drag-and-Drop
+
+- `KanbanBoard@tesserabx-pm` CBWire component replaces the server-rendered board view from Phase 3a. Mounted from `views/tasks/index.bxm` with `#wire( name = "KanbanBoard@tesserabx-pm", params = { projectId : ... } )#`. State (`q`, `priority`, `assigneeType`, `assigneeId`) is URL-persisted via `queryString` so a refreshed board keeps the filter applied. Transient state (`detailTaskId`, `notice`/`noticeKind`) is component-local.
+- Live filters via `wire:model.live` (search uses `.debounce.300ms` so each keystroke does not slam the server).
+- Quick-add per column via `wire:submit.prevent`: pressing Enter on the column's title input creates a minimal task at the bottom of that column, then clears the input.
+- TaskDetail offcanvas: clicking a card sets `data.detailTaskId`, the template conditionally renders a Bootstrap-styled offcanvas with the task's fields, and `wire:submit.prevent="saveDetail(...)"` persists edits through `TaskService.updateTask`.
+- Drag-and-drop wired via SortableJS (vendored under `resources/vendor/sortablejs-1.15.6/Sortable.min.js`) + `resources/js/board.js`. The component template emits `data-pm-kanban-column-status` on each column wrapper, `data-pm-kanban-column` on the body (the SortableJS drop zone), and `data-pm-task-id` on each card. The bootstrap script inside the template hooks `livewire:init` + `component.init` with an ID match (per the global CLAUDE.md rule) and calls `tesserabxPmKanban.init(componentId)`. The drag-end callback calls `wire.call("persistReorder", taskId, statusId, slotIndex)`.
+- `TaskService@tesserabx-pm` gains `reorderTask(id, targetStatusId, targetIndex, data)`. The implementation is a per-column re-sequence: the moved task is placed at `slotIndex` inside the destination column, all rows in the destination are re-numbered in 10-step gaps, and the source column (if different) is recompacted. Status transitions stamp / clear `completed_at` and emit the same `onPmTaskStatusChanged` + `onPmTaskCompleted` lifecycle events `updateTask` does, with `metadata.source = "drag-drop"` for downstream observability.
+- `resources/css/board.css` extracts the inline styles from Phase 3a and adds the SortableJS state classes (`pm-task-card-ghost`, `pm-task-card-chosen`, `pm-task-card-drag`) plus a drop-zone tint via `.pm-column-receiving`.
+- `settings.tesserabx.assets` declares the three assets on the agent surface so the host's `AddonAssetService@core` emits the `<link>` and `<script>` tags into the Agent layout: `/modules/tesserabx-pm/resources/css/board.css`, `/modules/tesserabx-pm/resources/vendor/sortablejs-1.15.6/Sortable.min.js`, and `/modules/tesserabx-pm/resources/js/board.js` (deferred).
+- `TaskServiceSpec` adds a `reorderTask` describe block: head-of-column re-numbering, cross-column move with `completed_at` toggle, and cross-project status rejection. `InstallSpec` adds three probes: CSS asset registered, both JS assets registered.
+- Two integer-binding bugs fixed during local verification: the `reorderTask` `UPDATE`s now `cast( :so as integer )` because the JDBC bind layer defaults numeric parameters to varchar (same flavor as the `estimated_hours` and `deleted_at` NULL workarounds in earlier phases).
+- Deferred to Phase 3c: per-project ProjectStatus CRUD UI (rename / recolor / reorder / add custom statuses) accessible from a settings cog on the board header; the `pm.recentActivity` dashboard widget; replacing the paste-a-UUID assignee inputs with a real agent/contact picker.
+
 ### Phase 3a: BoardService and the Kanban View
 
 - `BoardService@tesserabx-pm` owns the kanban grouping pipeline. `buildBoard(projectId, filters)` returns `{ statuses, columns, totalTasks, filters }` where `columns` is a struct keyed by `statusId` (plus an empty-string bucket for tasks whose `status_id` is null or refers to a removed row). `buildColumn(projectId, statusId, filters)` returns just one bucket; the Phase 3b CBWire layer will call this for the per-column re-renders that follow a drag-drop or quick-add.

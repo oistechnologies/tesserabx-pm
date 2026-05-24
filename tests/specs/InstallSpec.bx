@@ -25,6 +25,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.settingsReg  = variables.wb.getInstance( "SettingsRegistry@core" );
         variables.routeClaims  = variables.wb.getInstance( "RouteClaimsRegistry@core" );
         variables.apiResources = variables.wb.getInstance( "ApiResourceRegistry@api" );
+        variables.assetService = variables.wb.getInstance( "AddonAssetService@core" );
     }
 
     function run(){
@@ -186,6 +187,21 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
             it( "binds BoardService@tesserabx-pm in WireBox", function(){
                 expect( variables.wb.getInstance( "BoardService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            // ---- Phase 3b: CBWire kanban + drag-drop assets.
+
+            it( "registers the board CSS asset for the agent surface", function(){
+                var assets   = variables.assetService.listForSurface( "agent" );
+                var cssHrefs = assets.filter( ( a ) => a.kind == "css" ).map( ( a ) => a.href );
+                expect( cssHrefs ).toInclude( "/modules/tesserabx-pm/resources/css/board.css" );
+            } );
+
+            it( "registers the SortableJS vendor + board.js for the agent surface", function(){
+                var assets  = variables.assetService.listForSurface( "agent" );
+                var jsSrcs  = assets.filter( ( a ) => a.kind == "js" ).map( ( a ) => a.src );
+                expect( jsSrcs ).toInclude( "/modules/tesserabx-pm/resources/vendor/sortablejs-1.15.6/Sortable.min.js" );
+                expect( jsSrcs ).toInclude( "/modules/tesserabx-pm/resources/js/board.js" );
             } );
 
             // ---- Phase 2c: REST API surface.

@@ -1,0 +1,274 @@
+<bx:output>
+<bx:script>
+    // Pulled once per render. Pure data-shaping; the heavy lifting
+    // (queries, grouping, filter normalisation) lives in
+    // BoardService and is invoked through the component's
+    // `board()`/`project()`/`detailTask()`/`statuses()` helpers
+    // declared on KanbanBoard.bx.
+    local.project    = project();
+    local.board      = board();
+    local.detail     = detailTask();
+    local.statusList = statuses();
+    local.hasProject = !isSimpleValue( local.project );
+
+    // CSS hex colors must double the `#` per the CFML escape rule
+    // (the .bxm renders inside <bx:output>). Status entities store
+    // single-hash colors; we emit them as-is into HTML attributes
+    // because attribute parsing does not interpret `#`.
+
+    private string function priorityBadge( required string p ){
+        switch ( arguments.p ) {
+            case "urgent": return "danger";
+            case "high":   return "warning";
+            case "medium": return "secondary";
+            case "low":    return "info";
+            default:       return "secondary";
+        }
+    }
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+
+<bx:if !local.hasProject>
+    <div class="alert alert-danger">Project not found.</div>
+<bx:else>
+
+    <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+        <div>
+            <h1 class="mb-0 fs-3">#encodeForHTML( local.project.getName() )#</h1>
+            <p class="text-body-secondary mb-0 small">
+                #local.board.totalTasks# task<bx:if local.board.totalTasks neq 1>s</bx:if>
+                across #arrayLen( local.board.statuses )# column<bx:if arrayLen( local.board.statuses ) neq 1>s</bx:if>
+            </p>
+        </div>
+        <a class="btn btn-primary" href="/agent/pm/projects/#encodeForURL( local.project.getId() )#/tasks/new">
+            <i class="bi bi-plus-lg"></i> New task (full form)
+        </a>
+    </div>
+
+    <bx:if len( notice )>
+        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center" role="alert">
+            <span>#encodeForHTML( notice )#</span>
+            <button type="button" class="btn-close" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+        </div>
+    </bx:if>
+
+    <!--- Filter card with live wire:model.live bindings. Each      --->
+    <!--- keypress on the search box or change on a select triggers --->
+    <!--- a re-render with the filter applied; no submit button.    --->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <label class="form-label" for="kb-q">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="kb-q" wire:model.live.debounce.300ms="q" placeholder="Title contains...">
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label" for="kb-priority">Priority</label>
+                    <select class="form-select" id="kb-priority" wire:model.live="priority">
+                        <option value="">Any priority</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="urgent">urgent</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label" for="kb-assignee-type">Assignee type</label>
+                    <select class="form-select" id="kb-assignee-type" wire:model.live="assigneeType">
+                        <option value="">Any</option>
+                        <option value="agent">agent</option>
+                        <option value="contact">contact</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2 d-flex align-items-end">
+                    <button type="button" class="btn btn-outline-secondary w-100" wire:click="clearFilters">Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!--- Kanban columns. data-pm-kanban-column on the body marks  --->
+    <!--- a SortableJS drop zone; data-pm-kanban-column-status on  --->
+    <!--- the wrapper carries the destination status id for the JS --->
+    <!--- callback. Each card has data-pm-task-id.                  --->
+    <div class="pm-board">
+        <bx:loop array="#local.board.statuses#" item="s">
+            <bx:set local.bucket      = local.board.columns[ s.getId() ] >
+            <bx:set local.headerStyle = len( s.getColor() ?: "" ) ? 'style="border-top: 4px solid ' & encodeForHTMLAttribute( s.getColor() ) & ';"' : "" >
+            <div class="card pm-column" data-pm-kanban-column-status="#encodeForHTMLAttribute( s.getId() )#">
+                <div class="card-header d-flex align-items-center" #local.headerStyle#>
+                    <strong>#encodeForHTML( s.getName() )#</strong>
+                    <span class="badge text-bg-secondary ms-auto">#arrayLen( local.bucket.tasks )#</span>
+                </div>
+                <div class="card-body p-2 pm-column-body" data-pm-kanban-column>
+                    <bx:if !arrayLen( local.bucket.tasks )>
+                        <p class="text-body-secondary small text-center mb-2 py-2 fst-italic">Drop tasks here.</p>
+                    </bx:if>
+                    <bx:loop array="#local.bucket.tasks#" item="t">
+                        <div class="card mb-2 pm-task-card"
+                             data-pm-task-id="#encodeForHTMLAttribute( t.getId() )#"
+                             wire:click="openDetail( '#encodeForHTMLAttribute( t.getId() )#' )">
+                            <div class="card-body p-2">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <strong class="text-body small">#encodeForHTML( t.getTitle() )#</strong>
+                                    <span class="badge text-bg-#priorityBadge( t.getPriority() )#">#encodeForHTML( t.getPriority() )#</span>
+                                </div>
+                                <bx:if len( t.getAssigneeId() ?: "" )>
+                                    <div class="text-body-secondary small mt-1">
+                                        <i class="bi bi-person"></i> #encodeForHTML( t.getAssigneeType() )#
+                                        <code class="ms-1">#encodeForHTML( left( t.getAssigneeId(), 8 ) )#…</code>
+                                    </div>
+                                </bx:if>
+                                <div class="d-flex gap-2 align-items-center mt-1 small text-body-secondary">
+                                    <bx:if len( toString( t.getDueDate() ?: "" ) )>
+                                        <span><i class="bi bi-calendar"></i> #toString( t.getDueDate() )#</span>
+                                    </bx:if>
+                                    <bx:if !!t.getIsClientVisible()>
+                                        <span title="Visible to clients"><i class="bi bi-eye"></i></span>
+                                    </bx:if>
+                                    <bx:if len( toString( t.getCompletedAt() ?: "" ) )>
+                                        <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                    </bx:if>
+                                </div>
+                            </div>
+                        </div>
+                    </bx:loop>
+                </div>
+                <!--- Quick-add wire form. Each column tracks its own --->
+                <!--- transient title field via $set/$call rather than --->
+                <!--- a per-column data property.                       --->
+                <form class="card-footer p-2 pm-quick-add" wire:submit.prevent="quickAdd( '#encodeForHTMLAttribute( s.getId() )#', $event.target.querySelector('input[name=title]').value ); $event.target.reset();">
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control form-control-sm" name="title"
+                               placeholder="+ New in #encodeForHTMLAttribute( s.getName() )#"
+                               maxlength="500" autocomplete="off">
+                        <button class="btn btn-outline-primary btn-sm" type="submit" title="Add task"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                </form>
+            </div>
+        </bx:loop>
+
+        <!--- Tasks with no status row (status_id IS NULL or stale). --->
+        <bx:if structKeyExists( local.board.columns, "" ) and arrayLen( local.board.columns[ "" ].tasks )>
+            <div class="card border-warning pm-column" data-pm-kanban-column-status="">
+                <div class="card-header d-flex align-items-center">
+                    <strong>(Unassigned status)</strong>
+                    <span class="badge text-bg-warning ms-auto">#arrayLen( local.board.columns[ "" ].tasks )#</span>
+                </div>
+                <div class="card-body p-2 pm-column-body" data-pm-kanban-column>
+                    <bx:loop array="#local.board.columns[ "" ].tasks#" item="t">
+                        <div class="card mb-2 pm-task-card"
+                             data-pm-task-id="#encodeForHTMLAttribute( t.getId() )#"
+                             wire:click="openDetail( '#encodeForHTMLAttribute( t.getId() )#' )">
+                            <div class="card-body p-2">
+                                <strong class="text-body small">#encodeForHTML( t.getTitle() )#</strong>
+                            </div>
+                        </div>
+                    </bx:loop>
+                </div>
+            </div>
+        </bx:if>
+    </div>
+
+    <!--- TaskDetail offcanvas. Renders when data.detailTaskId is set --->
+    <!--- via wire:click="openDetail(...)" on a card. Close clears it. --->
+    <bx:if !isSimpleValue( local.detail ?: "" )>
+        <div class="offcanvas offcanvas-end show pm-task-detail-offcanvas" tabindex="-1" style="visibility: visible;" aria-modal="true" role="dialog">
+            <div class="offcanvas-header">
+                <h5 class="offcanvas-title">#encodeForHTML( local.detail.getTitle() )#</h5>
+                <button type="button" class="btn-close" aria-label="Close" wire:click="closeDetail"></button>
+            </div>
+            <div class="offcanvas-body">
+                <form wire:submit.prevent="saveDetail( {
+                        title           : $event.target.querySelector('[name=title]').value,
+                        description     : $event.target.querySelector('[name=description]').value,
+                        statusId        : $event.target.querySelector('[name=statusId]').value,
+                        priority        : $event.target.querySelector('[name=priority]').value,
+                        dueDate         : $event.target.querySelector('[name=dueDate]').value,
+                        estimatedHours  : $event.target.querySelector('[name=estimatedHours]').value,
+                        isClientVisible : $event.target.querySelector('[name=isClientVisible]').checked
+                    } )">
+                    <div class="mb-3">
+                        <label class="form-label" for="dtl-title">Title</label>
+                        <input type="text" class="form-control" id="dtl-title" name="title"
+                               value="#encodeForHTMLAttribute( local.detail.getTitle() )#" maxlength="500" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="dtl-desc">Description</label>
+                        <textarea class="form-control" id="dtl-desc" name="description" rows="5">#encodeForHTML( local.detail.getDescription() ?: "" )#</textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <label class="form-label" for="dtl-status">Status</label>
+                            <select class="form-select" id="dtl-status" name="statusId">
+                                <option value="">(no status)</option>
+                                <bx:loop array="#local.statusList#" item="s">
+                                    <option value="#encodeForHTMLAttribute( s.getId() )#"
+                                            <bx:if ( local.detail.getStatusId() ?: "" ) eq s.getId()> selected</bx:if>>
+                                        #encodeForHTML( s.getName() )#
+                                    </option>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="dtl-priority">Priority</label>
+                            <select class="form-select" id="dtl-priority" name="priority">
+                                <bx:loop array="#[ "low", "medium", "high", "urgent" ]#" item="p">
+                                    <option value="#p#" <bx:if ( local.detail.getPriority() ?: "medium" ) eq p> selected</bx:if>>#p#</option>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="dtl-due">Due date</label>
+                            <input type="date" class="form-control" id="dtl-due" name="dueDate"
+                                   value="#encodeForHTMLAttribute( toString( local.detail.getDueDate() ?: "" ) )#">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label" for="dtl-est">Estimated hours</label>
+                            <input type="number" step="0.25" min="0" class="form-control" id="dtl-est" name="estimatedHours"
+                                   value="#encodeForHTMLAttribute( local.detail.getEstimatedHours() ?: "" )#">
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="dtl-cv" name="isClientVisible" value="true"
+                                       <bx:if !!local.detail.getIsClientVisible()> checked</bx:if>>
+                                <label class="form-check-label" for="dtl-cv">Visible to clients</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 mt-4">
+                        <button class="btn btn-primary" type="submit"><i class="bi bi-check-lg"></i> Save</button>
+                        <a class="btn btn-outline-secondary" href="/agent/pm/tasks/#encodeForURL( local.detail.getId() )#">Open full page</a>
+                        <button class="btn btn-link ms-auto" type="button" wire:click="closeDetail">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="offcanvas-backdrop fade show" wire:click="closeDetail"></div>
+    </bx:if>
+</bx:if>
+
+</div>
+
+<!--- Drag-drop bootstrap. The CBWire docs (and PM's global       --->
+<!--- CLAUDE.md) require initialising any wire-aware JS via the   --->
+<!--- livewire:init + component.init hook with an ID check;       --->
+<!--- DOMContentLoaded fires before the wire registers and        --->
+<!--- Livewire.find() returns undefined.                          --->
+<script>
+    document.addEventListener( "livewire:init", function(){
+        Livewire.hook( "component.init", function( payload ){
+            var component = payload.component;
+            if ( !component ) return;
+            if ( component.id !== "#_getID()#" ) return;
+            if ( window.tesserabxPmKanban && typeof window.tesserabxPmKanban.init === "function" ) {
+                window.tesserabxPmKanban.init( component.id );
+            }
+        } );
+    } );
+</script>
+</bx:output>

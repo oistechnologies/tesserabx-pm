@@ -257,6 +257,63 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( idxB lt idxA ).toBeTrue( "Lower sort_order should sort first." );
             } );
 
+            describe( "reorderTask (drag-drop persistence)", function(){
+                it( "moves a task to the head of its destination column and re-numbers in 10-step gaps", function(){
+                    var ctx = setupProject( fixtureOrgIds );
+                    var statusSvc = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+                    var statuses  = statusSvc.listForProject( ctx.project.getId() );
+                    var backlog   = statuses[ 1 ];
+
+                    // Create three tasks in Backlog.
+                    var a = variables.svc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "A", statusId : backlog.getId() } );
+                    var b = variables.svc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "B", statusId : backlog.getId() } );
+                    var c = variables.svc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "C", statusId : backlog.getId() } );
+
+                    // Move C to index 0 (head of column).
+                    variables.svc.reorderTask( id : c.getId(), targetStatusId : backlog.getId(), targetIndex : 0 );
+
+                    var ordered = variables.svc.listForProject( ctx.project.getId(), backlog.getId() );
+                    var ids     = ordered.map( ( t ) => t.getId() );
+                    expect( ids[ 1 ] ).toBe( c.getId(), "C should now be first." );
+                } );
+
+                it( "moves a task across columns, stamps completed_at when entering a completed status", function(){
+                    var ctx = setupProject( fixtureOrgIds );
+                    var statusSvc = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+                    var statuses  = statusSvc.listForProject( ctx.project.getId() );
+                    var backlog   = statuses[ 1 ];
+                    var doneRow   = "";
+                    for ( var s in statuses ) {
+                        if ( !!s.getIsCompleted() ) doneRow = s;
+                    }
+
+                    var t = variables.svc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "moveme", statusId : backlog.getId() } );
+
+                    variables.svc.reorderTask( id : t.getId(), targetStatusId : doneRow.getId(), targetIndex : 0 );
+
+                    var refreshed = variables.svc.getTask( t.getId() );
+                    expect( refreshed.getStatusId() ).toBe( doneRow.getId() );
+                    expect( toString( refreshed.getCompletedAt() ?: "" ) ).notToBeEmpty( "Moving into a completed status should stamp completed_at." );
+
+                    // Moving back out of the completed column should clear completed_at.
+                    variables.svc.reorderTask( id : t.getId(), targetStatusId : backlog.getId(), targetIndex : 0 );
+                    var again = variables.svc.getTask( t.getId() );
+                    expect( toString( again.getCompletedAt() ?: "" ) ).toBe( "" );
+                } );
+
+                it( "rejects a target status from a different project", function(){
+                    var ctxA = setupProject( fixtureOrgIds );
+                    var ctxB = setupProject( fixtureOrgIds );
+                    var statusSvc = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+                    var foreignStatus = statusSvc.listForProject( ctxA.project.getId() )[ 1 ];
+
+                    var t = variables.svc.createTask( { projectId : ctxB.project.getId(), organizationId : ctxB.orgId, title : "stay put" } );
+                    expect( function(){
+                        variables.svc.reorderTask( id : t.getId(), targetStatusId : foreignStatus.getId(), targetIndex : 0 );
+                    } ).toThrow( type = "TaskService.InvalidStatus" );
+                } );
+            } );
+
         } );
     }
 

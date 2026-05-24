@@ -1,0 +1,73 @@
+/*
+ * tesserabx-pm kanban board.
+ * Loaded via settings.tesserabx.assets on the agent surface.
+ */
+
+.pm-board {
+	display: flex;
+	gap: 1rem;
+	overflow-x: auto;
+	padding-bottom: 0.5rem;
+	min-height: 60vh;
+}
+
+.pm-column {
+	background: var(--bs-tertiary-bg);
+	width: 320px;
+	flex-shrink: 0;
+}
+
+.pm-column-body {
+	min-height: 80px;
+	max-height: 60vh;
+	overflow-y: auto;
+}
+
+.pm-task-card {
+	transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+	cursor: pointer;
+}
+
+.pm-task-card:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(0,0,0,.08);
+}
+
+/*
+ * SortableJS state hooks. `pm-task-card-ghost` paints the spot a
+ * dragged card will land; `pm-task-card-chosen` keeps the picked-up
+ * card visually distinct while it travels.
+ */
+.pm-task-card-ghost {
+	opacity: .35;
+	background: var(--bs-primary-bg-subtle);
+	border: 1px dashed var(--bs-primary);
+}
+
+.pm-task-card-chosen {
+	box-shadow: 0 8px 24px rgba(0,0,0,.18);
+	transform: scale(1.02);
+}
+
+.pm-task-card-drag {
+	cursor: grabbing;
+}
+
+/*
+ * Per-column body during an active drag. Bootstrap's bg-primary-subtle
+ * tints the drop zone so it's obvious where the card will go.
+ */
+.pm-column-body.pm-column-receiving {
+	background: var(--bs-primary-bg-subtle);
+	border-radius: .25rem;
+}
+
+/* TaskDetail offcanvas tweaks. */
+.pm-task-detail-offcanvas {
+	width: min(640px, 100vw);
+}
+
+/* Quick-add input lives in the column footer with a tighter look. */
+.pm-quick-add input[type="text"] {
+	font-size: .8rem;
+}

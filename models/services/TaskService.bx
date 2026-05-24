@@ -314,6 +314,164 @@ class singleton=true {
         return task;
     }
 
+    /**
+     * Drag-and-drop persistence. Moves a task into the target
+     * status column at the given zero-based slot index, shifting
+     * the sort_order of the surviving rows so the column remains
+     * compact.
+     *
+     * Implemented as a per-column re-sort rather than a single
+     * UPDATE so the column rows stay contiguous after any number
+     * of drag-drops. The cost is one re-numbering pass per moved
+     * column (the old column shrinks; the new column grows) which
+     * is bounded by the column size.
+     *
+     * Emits the same lifecycle events as updateTask (status
+     * change sync; completed_at on entering a completed status).
+     */
+    public any function reorderTask(
+        required string id,
+        required string targetStatusId,
+        required numeric targetIndex,
+        struct data = {}
+    ){
+        var task = getTask( arguments.id );
+        if ( isNull( task ) ) throw( type = "TaskService.UnknownTask", message = "No task with id [#arguments.id#]." );
+
+        var fromStatusId  = task.getStatusId() ?: "";
+        var toStatusId    = trim( arguments.targetStatusId );
+        var slotIndex     = max( 0, int( val( arguments.targetIndex ) ) );
+
+        // Validate the destination status (if non-empty) belongs to
+        // the same project as the task. Empty toStatusId means
+        // "move to the (unassigned status) bucket" — allowed but
+        // unusual.
+        var newStatusRow = "";
+        if ( len( toStatusId ) ) {
+            newStatusRow = projectStatusService.getStatus( toStatusId );
+            if ( isNull( newStatusRow ) || newStatusRow.getProjectId() != task.getProjectId() ) {
+                throw( type = "TaskService.InvalidStatus", message = "Status [#toStatusId#] does not belong to project [#task.getProjectId()#]." );
+            }
+        }
+
+        // Re-sequence the destination column: the moved task gets
+        // sort_order = slotIndex * 10; existing rows are shifted up
+        // by 10 when they should sort after the new slot. The * 10
+        // gap leaves room for future single-row tweaks without a
+        // full re-sequence.
+        //
+        // The source column also needs its survivors compacted so a
+        // later insertion does not collide with stale sort_order
+        // values. We run the same re-sequence on both columns; the
+        // SQL below handles same-column moves as a single update
+        // because fromStatusId == toStatusId.
+        transaction {
+            // Take the task out of its current column first.
+            queryExecute(
+                "UPDATE pm_tasks SET sort_order = -1 WHERE id = :id",
+                { id : arguments.id }
+            );
+
+            // Compute the new sort_order map for the destination column.
+            var destRows = queryExecute(
+                "SELECT id, sort_order FROM pm_tasks
+                 WHERE  project_id = :pid
+                 AND    status_id #len( toStatusId ) ? "= :sid" : "IS NULL"#
+                 AND    deleted_at IS NULL
+                 AND    id <> :tid
+                 ORDER BY sort_order ASC, created_at ASC",
+                len( toStatusId )
+                    ? { pid : task.getProjectId(), sid : toStatusId, tid : arguments.id }
+                    : { pid : task.getProjectId(),                   tid : arguments.id }
+            );
+
+            // Insert the moved task at `slotIndex` and re-number
+            // everything in 10-step increments.
+            var sequence = [];
+            for ( var i = 1; i <= destRows.recordCount; i++ ) {
+                sequence.append( destRows.id[ i ] );
+            }
+            if ( slotIndex >= sequence.len() ) {
+                sequence.append( arguments.id );
+            } else {
+                sequence.insertAt( slotIndex + 1, arguments.id );
+            }
+            for ( var i = 1; i <= sequence.len(); i++ ) {
+                queryExecute(
+                    "UPDATE pm_tasks
+                     SET    sort_order = cast( :so as integer ),
+                            status_id  = #len( toStatusId ) ? ":sid" : "NULL"#,
+                            updated_at = CURRENT_TIMESTAMP
+                     WHERE  id = :id",
+                    len( toStatusId )
+                        ? { so : ( i - 1 ) * 10, sid : toStatusId, id : sequence[ i ] }
+                        : { so : ( i - 1 ) * 10,                   id : sequence[ i ] }
+                );
+            }
+
+            // If the move crossed a column boundary, also recompact
+            // the source column so its sort_order stays dense.
+            if ( fromStatusId != toStatusId && len( fromStatusId ) ) {
+                var srcRows = queryExecute(
+                    "SELECT id FROM pm_tasks
+                     WHERE  project_id = :pid
+                     AND    status_id = :sid
+                     AND    deleted_at IS NULL
+                     ORDER BY sort_order ASC, created_at ASC",
+                    { pid : task.getProjectId(), sid : fromStatusId }
+                );
+                for ( var i = 1; i <= srcRows.recordCount; i++ ) {
+                    queryExecute(
+                        "UPDATE pm_tasks SET sort_order = cast( :so as integer ) WHERE id = :id",
+                        { so : ( i - 1 ) * 10, id : srcRows.id[ i ] }
+                    );
+                }
+            }
+
+            // Status transition completed_at maintenance.
+            if ( fromStatusId != toStatusId ) {
+                if ( !isNull( newStatusRow ) && !!newStatusRow.getIsCompleted() ) {
+                    queryExecute(
+                        "UPDATE pm_tasks SET completed_at = CURRENT_TIMESTAMP WHERE id = :id AND completed_at IS NULL",
+                        { id : arguments.id }
+                    );
+                } else {
+                    queryExecute(
+                        "UPDATE pm_tasks SET completed_at = NULL WHERE id = :id",
+                        { id : arguments.id }
+                    );
+                }
+            }
+        }
+
+        var refreshed = getTask( arguments.id );
+
+        // Status-change side-effects: lifecycle events. Same payload
+        // shape updateTask uses; the close-on-complete listener in
+        // Phase 8 keys off `onPmTaskStatusChanged`.
+        if ( fromStatusId != toStatusId ) {
+            announceLifecycleEvent(
+                eventName : "onPmTaskStatusChanged",
+                task      : refreshed,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: "system",
+                metadata  : { fromStatusId : fromStatusId, toStatusId : toStatusId, source : "drag-drop" },
+                async     : false
+            );
+            if ( !isNull( newStatusRow ) && !!newStatusRow.getIsCompleted() ) {
+                announceLifecycleEvent(
+                    eventName : "onPmTaskCompleted",
+                    task      : refreshed,
+                    actorType : arguments.data.actorType ?: "system",
+                    actorId   : arguments.data.actorId   ?: "system",
+                    metadata  : { source : "drag-drop" }
+                );
+            }
+        }
+
+        return refreshed;
+    }
+
     public any function restoreTask( required string id, struct data = {} ){
         // Pull without the deleted_at filter so soft-deleted rows
         // are reachable.

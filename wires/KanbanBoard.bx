@@ -1,0 +1,182 @@
+/**
+ * KanbanBoard: the live, drag-and-drop project board.
+ *
+ * Embedded from the agent surface board view via
+ *   #wire( name = "KanbanBoard@tesserabx-pm", params = { projectId : "..." } )#
+ *
+ * State (all URL-persisted via queryString):
+ *   - q             : title search
+ *   - priority      : low / medium / high / urgent or ""
+ *   - assigneeType  : "agent" | "contact" | ""
+ *   - assigneeId    : optional UUID
+ *
+ * Transient state (not URL-persisted):
+ *   - detailTaskId  : when non-empty, the TaskDetail offcanvas
+ *                     renders for that task
+ *   - notice / noticeKind : transient alert above the board
+ *
+ * Drag-drop wiring: the template emits `data-pm-kanban-column` and
+ * `data-pm-kanban-column-status` attributes on each column body, plus
+ * `data-pm-task-id` on each card. resources/js/board.js (registered
+ * via the assets manifest) calls Sortable.create on each column
+ * during the livewire:init + component.init hook. The drag-end
+ * callback calls `persistReorder(taskId, statusId, slotIndex)`
+ * on this component.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="boardService"         inject="BoardService@tesserabx-pm";
+    property name="projectService"       inject="ProjectService@tesserabx-pm";
+    property name="taskService"          inject="TaskService@tesserabx-pm";
+    property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="auth"                 inject="AuthenticationService@cbauth";
+
+    data = {
+        "projectId"     : "",
+        "q"             : "",
+        "priority"      : "",
+        "assigneeType"  : "",
+        "assigneeId"    : "",
+        "detailTaskId"  : "",
+        "notice"        : "",
+        "noticeKind"    : "info"
+    };
+
+    queryString = [ "q", "priority", "assigneeType", "assigneeId" ];
+
+    // ---------------- Lifecycle ----------------
+
+    function onMount( required struct params = {} ){
+        data.projectId = arguments.params.projectId ?: "";
+    }
+
+    // ---------------- Server-side helpers (called from template) ----------------
+
+    function project(){
+        if ( !len( data.projectId ) ) return "";
+        return projectService.getProject( data.projectId );
+    }
+
+    function board(){
+        if ( !len( data.projectId ) ) return { statuses : [], columns : { "" : { status : "", tasks : [] } }, totalTasks : 0, filters : {} };
+        return boardService.buildBoard(
+            projectId : data.projectId,
+            filters   : {
+                search       : data.q,
+                priority     : data.priority,
+                assigneeType : data.assigneeType,
+                assigneeId   : data.assigneeId
+            }
+        );
+    }
+
+    function detailTask(){
+        if ( !len( data.detailTaskId ) ) return "";
+        return taskService.getTask( data.detailTaskId );
+    }
+
+    function statuses(){
+        if ( !len( data.projectId ) ) return [];
+        return projectStatusService.listForProject( data.projectId );
+    }
+
+    // ---------------- Actions ----------------
+
+    /**
+     * Drag-and-drop callback. Invoked from resources/js/board.js
+     * after SortableJS reports a finished move.
+     */
+    function persistReorder( taskId, targetStatusId, targetIndex ){
+        try {
+            taskService.reorderTask(
+                id             = arguments.taskId,
+                targetStatusId = arguments.targetStatusId ?: "",
+                targetIndex    = arguments.targetIndex ?: 0,
+                data           = { actorType : "agent", actorId : currentAgentId() }
+            );
+        } catch ( any e ) {
+            notice( "Could not move task: " & e.message, "danger" );
+        }
+    }
+
+    /**
+     * Quick-add a task to a specific status column. Empty titles
+     * are ignored (the input clears via wire:model on the next
+     * render). Bound to wire:submit on the column footer form.
+     */
+    function quickAdd( statusId, title ){
+        var trimmed = trim( arguments.title ?: "" );
+        if ( !len( trimmed ) ) return;
+        var p = project();
+        if ( isSimpleValue( p ) ) {
+            notice( "Project not found.", "danger" );
+            return;
+        }
+        try {
+            taskService.createTask( {
+                projectId      : p.getId(),
+                organizationId : p.getOrganizationId(),
+                title          : trimmed,
+                statusId       : arguments.statusId ?: "",
+                actorType      : "agent",
+                actorId        : currentAgentId()
+            } );
+        } catch ( any e ) {
+            notice( "Could not add task: " & e.message, "danger" );
+        }
+    }
+
+    function openDetail( taskId ){
+        data.detailTaskId = arguments.taskId ?: "";
+    }
+
+    function closeDetail(){
+        data.detailTaskId = "";
+    }
+
+    /**
+     * Persist edits from the TaskDetail offcanvas. Patch struct
+     * shape mirrors TaskService.updateTask; the template only
+     * forwards fields the user actually touched.
+     */
+    function saveDetail( required struct patch = {} ){
+        if ( !len( data.detailTaskId ) ) return;
+        try {
+            var cleanPatch = arguments.patch;
+            cleanPatch.actorType = "agent";
+            cleanPatch.actorId   = currentAgentId();
+            taskService.updateTask( data.detailTaskId, cleanPatch );
+            notice( "Task updated.", "success" );
+            // Close the offcanvas on success so the user lands back
+            // on the board with the new state visible. Errors leave
+            // it open so they can correct the input and retry.
+            data.detailTaskId = "";
+        } catch ( any e ) {
+            notice( "Could not save task: " & e.message, "danger" );
+        }
+    }
+
+    function clearFilters(){
+        data.q            = "";
+        data.priority     = "";
+        data.assigneeType = "";
+        data.assigneeId   = "";
+    }
+
+    // ---------------- internals ----------------
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}
