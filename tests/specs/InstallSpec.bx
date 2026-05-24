@@ -28,6 +28,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.assetService     = variables.wb.getInstance( "AddonAssetService@core" );
         variables.webhookRegistry  = variables.wb.getInstance( "WebhookEventRegistry@api" );
         variables.auditService     = variables.wb.getInstance( "AuditService@audit" );
+        variables.widgetRegistry   = variables.wb.getInstance( "DashboardWidgetRegistry@reporting" );
     }
 
     function run(){
@@ -310,6 +311,29 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( types ).toInclude( "tesserabx-pm.project_deleted" );
                 expect( types ).toInclude( "tesserabx-pm.task_assigned_to_contact" );
                 expect( types ).toInclude( "tesserabx-pm.template_applied" );
+            } );
+
+            // ---- Phase 5: time tracking + reports + widget.
+
+            it( "binds TimeTrackingService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TimeTrackingService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds TimeLogDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TimeLogDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the pm.timeThisWeek dashboard widget", function(){
+                var ids = variables.widgetRegistry.listAll().map( ( w ) => w.id );
+                expect( ids ).toInclude( "pm.timeThisWeek" );
+            } );
+
+            it( "registers the pm.agent.time-reports navigation entry", function(){
+                var entry = variables.nav.findById( "pm.agent.time-reports" );
+                expect( entry ).notToBeNull();
+                expect( entry.route   ).toBe( "/agent/pm/time-reports" );
+                expect( entry.surface ).toBe( "agent" );
+                expect( entry.requiredPermission ).toBe( "pm.view" );
             } );
 
             // Phase 2+ probes are appended below as registries are

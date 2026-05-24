@@ -71,7 +71,14 @@ class {
         route( "subtasks/:id/complete" ).withVerbs( "POST" ).to( "Subtasks.complete" );
         route( "subtasks/:id/reopen"   ).withVerbs( "POST" ).to( "Subtasks.reopen" );
         route( "subtasks/:id/edit"     ).to( "Subtasks.edit" );
-        route( "subtasks/:id"          ).withVerbs( "POST" ).to( "Subtasks.update" );
+        route( "subtasks/:id"          ).withHandler( "Subtasks" ).toAction( {
+            "GET"  : "show",
+            "POST" : "update"
+        } );
+
+        // ---- Time reports.
+
+        route( "time-reports" ).to( "TimeReports.index" );
     }
 
 }

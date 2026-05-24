@@ -6,6 +6,31 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 5: Time Tracking
+
+- `TimeTrackingService@tesserabx-pm` ships polymorphic time-log CRUD over Task and Subtask (`loggable_type` + `loggable_id`) and over Agent / Contact (`user_type` + `user_id`). `createTimeLog` enforces the BUILD-PLAN §3.7 per-project opt-in: it walks from the loggable up to the owning project and refuses if `pm_projects.time_tracking_enabled = false`, throwing `TimeTrackingService.TrackingDisabled` so the wire can render a clear message. Soft-delete via `deleted_at`.
+- Rollup queries are pure SQL (same workaround as `ProjectEventService` — safe across thread contexts):
+  - `totalsForLoggable(loggableType, loggableId)` — direct sum.
+  - `totalsForTask(taskId)` — direct task hours plus all of its subtask hours.
+  - `totalsForProject(projectId)` — every task and subtask under the project.
+- Report queries:
+  - `listLogs(filter)` — filter by `organizationId`, `projectId`, `userType`, `userId`, `fromDate`, `toDate`, `isBillable`, `loggableType`; the project filter expands through the task / subtask hierarchy. Capped at 1000 rows.
+  - `totalsByUser(filter)` — grouped totals for the by-user report view.
+  - `totalsByProject(filter)` — grouped totals via two SQL passes (task-direct + subtask-via-task) merged in BoxLang.
+  - `weeklyForAgent(agentId)` — Monday-Sunday window for the dashboard widget.
+- New CBWire `TimeLogger@tesserabx-pm` (composer + history + rollup badges). Hides the composer when the project has time tracking off; keeps the read-only history. Embedded on the task detail page below the CommentThread and on the new subtask show page.
+- New CBWire `TimeReport@tesserabx-pm` for the standalone reports page at `/agent/pm/time-reports`. Filters (project, user type, user id, from/to date, billable) and a grouping toggle (by user / by project / raw list) all live in `queryString[]` so a shared link preserves the report state. Grand-total summary across the visible rows.
+- New CBFM partial `views/widgets/time_this_week.bxm` driven by the `pm.timeThisWeek` dashboard widget. The host's dashboard renderer calls `TimeTrackingService.weeklyForAgent(agentId)` and hands the result to the partial as `data`. The whole card links through to `/agent/pm/time-reports`.
+- New handler / view: `handlers/TimeReports.bx` and `views/time/reports.bxm` mount the report wire under the Agent layout.
+- New subtask show page at `/agent/pm/subtasks/:id` (handler action `Subtasks.show`, view `views/subtasks/show.bxm`). Embeds the TimeLogger for the subtask alongside its details. The subtask titles in the parent task's subtask list now link through to this page.
+- New DTO: `TimeLogDto@tesserabx-pm` with `fromTimeLog` / `fromTimeLogArray` returning snake_case structs. New contract: `ITimeTrackingService@tesserabx-pm`.
+- Manifest deltas:
+  - `dashboardWidgets` populated with the `pm.timeThisWeek` entry per BUILD-PLAN §9 Phase 5; `contributesTo` extended with `dashboardWidgets`.
+  - `navigation` adds `pm.agent.time-reports` (agent surface, main menu, gated on `pm.view`).
+- Router gains `GET /subtasks/:id` (handler-bound alongside the existing `POST /subtasks/:id` update) and `GET /time-reports`.
+- New test bundle `TimeTrackingServiceSpec` (10 specs covering the disabled-gate, billable/non-billable splits, single-loggable totals, subtask-to-task rollup, project rollup across both kinds, by-user grouping, soft-delete invariants, validation throws). `InstallSpec` adds 4 new probes: `TimeTrackingService` binding, `TimeLogDto` binding, the `pm.timeThisWeek` widget in `DashboardWidgetRegistry@reporting`, and the `pm.agent.time-reports` nav entry. 41 specs total in InstallSpec.
+- Deferred to later phases: dedicated permission for who can log time (current code gates on the project's `time_tracking_enabled` flag and the agent firewall; per-user "time-tracker" role lands when the BUILD-PLAN needs it); the cross-project per-agent estimate-vs-actual visualization (Phase 10 reporting lands the chart layer).
+
 ### Phase 4b: Project Event Log, Audit Events, Activity Feeds
 
 - `ProjectEventService@tesserabx-pm` writes and reads PM's domain timeline (`pm_project_events`). `record(...)` appends one row with polymorphic subject (`project|task|subtask|comment`) and actor (`agent|contact|system`); `listForProject(projectId, filter)` and `listForSubject(subjectType, subjectId, filter)` return up to 200 newest-first rows with an optional `actorType` filter. INSERTs go through raw `queryExecute` rather than the Quick entity because the announce thread does not initialize Quick's column metadata reliably (per the global CLAUDE.md note on non-request JVM threads).

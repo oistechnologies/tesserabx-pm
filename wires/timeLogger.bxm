@@ -1,0 +1,88 @@
+<bx:output>
+<bx:script>
+    local.logs    = logs();
+    local.totals  = totals();
+    local.enabled = enabled();
+    local.me      = viewer();
+</bx:script>
+
+<div class="card" data-pm-wire-id="#_getID()#">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h5 mb-0">Time
+                <span class="badge text-bg-secondary ms-1">#numberFormat( local.totals.totalHours, "0.00" )#h</span>
+                <bx:if local.totals.billableHours gt 0>
+                    <span class="badge text-bg-success ms-1" title="Billable hours"><i class="bi bi-currency-dollar"></i>#numberFormat( local.totals.billableHours, "0.00" )#h</span>
+                </bx:if>
+            </h2>
+        </div>
+
+        <bx:if len( notice )>
+            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+                <span>#encodeForHTML( notice )#</span>
+                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+            </div>
+        </bx:if>
+
+        <bx:if !local.enabled>
+            <p class="text-body-secondary small fst-italic mb-2">Time tracking is disabled for this project. Enable it on the project's edit page to start logging hours.</p>
+        <bx:else>
+            <!--- Composer. Agent-side; contact composer lands with --->
+            <!--- Phase 11 portal embed.                            --->
+            <form wire:submit.prevent="post" class="mb-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label small mb-0" for="tl-hours">Hours</label>
+                        <input id="tl-hours" type="number" min="0" step="0.25" class="form-control form-control-sm" wire:model="hours" placeholder="0.50">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small mb-0" for="tl-desc">Note (optional)</label>
+                        <input id="tl-desc" type="text" maxlength="500" class="form-control form-control-sm" wire:model="description" placeholder="What did you work on?">
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <div class="form-check form-switch mt-3">
+                            <input id="tl-bill" type="checkbox" class="form-check-input" wire:model="isBillable">
+                            <label class="form-check-label small" for="tl-bill">Billable</label>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-1">
+                        <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                </div>
+            </form>
+        </bx:if>
+
+        <!--- History. Always visible (read-only when disabled). --->
+        <bx:if !arrayLen( local.logs )>
+            <p class="text-body-secondary small fst-italic mb-0">No time entries yet.</p>
+        <bx:else>
+            <ul class="list-unstyled mb-0">
+                <bx:loop array="#local.logs#" item="t">
+                    <li class="border-top pt-2 pb-2 d-flex justify-content-between align-items-start gap-2">
+                        <div class="small">
+                            <strong>#numberFormat( t.getHours(), "0.00" )#h</strong>
+                            <bx:if !!t.getIsBillable()>
+                                <span class="badge text-bg-success ms-1"><i class="bi bi-currency-dollar"></i></span>
+                            </bx:if>
+                            <bx:if t.getUserType() eq "agent"><i class="bi bi-person-badge ms-2"></i><bx:else><i class="bi bi-person ms-2"></i></bx:if>
+                            #encodeForHTML( t.getUserType() )#
+                            <code class="ms-1 text-body-secondary">#encodeForHTML( left( t.getUserId(), 8 ) )#…</code>
+                            <span class="text-body-secondary ms-2">#dateTimeFormat( t.getLoggedAt(), "yyyy-mm-dd HH:nn" )#</span>
+                            <bx:if len( t.getDescription() ?: "" )>
+                                <div class="text-body-secondary">#encodeForHTML( t.getDescription() )#</div>
+                            </bx:if>
+                        </div>
+                        <bx:if ( t.getUserType() eq local.me.accountType ) and ( t.getUserId() eq local.me.accountId )>
+                            <button class="btn btn-link btn-sm text-danger p-0"
+                                    wire:click="deleteLog('#encodeForHTMLAttribute( t.getId() )#')"
+                                    wire:confirm="Delete this time entry?">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </bx:if>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

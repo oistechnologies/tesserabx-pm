@@ -58,7 +58,7 @@ class {
                     "permissions", "roles", "navigation",
                     "adminPages", "settings", "routeClaims",
                     "apiResources", "webhookEvents", "assets",
-                    "auditEvents"
+                    "auditEvents", "dashboardWidgets"
                 ],
                 requiresAi     : false,
 
@@ -157,6 +157,9 @@ class {
                     { path : "/api/v1/pm/tasks/:taskId/subtasks", verbs : "POST",   module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "create" },
                     { path : "/api/v1/pm/subtasks/:id",           verbs : "PATCH",  module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "update" },
                     { path : "/api/v1/pm/subtasks/:id",           verbs : "DELETE", module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "remove" }
+                    // Note: /agent/pm/time-reports is owned by PM's
+                    // own module Router (entryPoint=agent/pm), so it
+                    // is NOT declared as a routeClaim.
                 ],
                 navigation : [
                     {
@@ -178,6 +181,19 @@ class {
                         route              : "/pm",
                         icon               : "bi bi-kanban",
                         sortWeight         : 200,
+                        requiresAuth       : true,
+                        requiredPermission : "pm.view"
+                    },
+                    // Phase 5: secondary nav entry for the time-
+                    // reports page.
+                    {
+                        id                 : "pm.agent.time-reports",
+                        surface            : "agent",
+                        menu               : "main",
+                        label              : "Time reports",
+                        route              : "/agent/pm/time-reports",
+                        icon               : "bi bi-stopwatch",
+                        sortWeight         : 210,
                         requiresAuth       : true,
                         requiredPermission : "pm.view"
                     }
@@ -275,8 +291,24 @@ class {
                 // declares the templates).
                 notificationTemplates   : [],
 
-                // Phases 3, 5, 12: dashboard widgets and AI features.
-                dashboardWidgets        : [],
+                // Phase 5: agent home dashboard widget. The host's
+                // dashboard renderer calls dataProvider.dataMethod
+                // with the signed-in agent's id and hands the result
+                // to the partial as `data`.
+                dashboardWidgets : [
+                    {
+                        id                 : "pm.timeThisWeek",
+                        title              : "Time logged this week",
+                        partial            : "widgets/time_this_week",
+                        module             : "tesserabx-pm",
+                        dataProvider       : "TimeTrackingService@tesserabx-pm",
+                        dataMethod         : "weeklyForAgent",
+                        defaultGridSize    : "col-12 col-md-4",
+                        sortWeight         : 600,
+                        requiredPermission : "pm.view",
+                        zone               : "agent-home"
+                    }
+                ],
                 aiFeatures              : [],
                 embeddingConsumers      : [],
 
@@ -365,6 +397,9 @@ class {
         binder.map( "ProjectEventService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.ProjectEventService" )
               .asSingleton();
+        binder.map( "TimeTrackingService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.TimeTrackingService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -381,6 +416,9 @@ class {
               .asSingleton();
         binder.map( "ProjectEventDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.ProjectEventDto" )
+              .asSingleton();
+        binder.map( "TimeLogDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.TimeLogDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

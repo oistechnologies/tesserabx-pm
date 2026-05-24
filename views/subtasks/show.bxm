@@ -1,0 +1,120 @@
+<bx:output>
+<bx:set local.s       = prc.subtask >
+<bx:set local.task    = prc.task >
+<bx:set local.project = prc.project >
+
+<div class="container-fluid">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+            <bx:if !isNull( local.project )>
+                <li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.project.getId() )#" class="link-secondary">#encodeForHTML( local.project.getName() )#</a></li>
+            </bx:if>
+            <bx:if !isNull( local.task )>
+                <li class="breadcrumb-item"><a href="/agent/pm/tasks/#encodeForURL( local.task.getId() )#" class="link-secondary">#encodeForHTML( local.task.getTitle() )#</a></li>
+            </bx:if>
+            <li class="breadcrumb-item active" aria-current="page">#encodeForHTML( local.s.getTitle() )#</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-start mb-3 gap-3 flex-wrap">
+        <div>
+            <h1 class="mb-1 fs-3">
+                <bx:if !!local.s.getIsCompleted()>
+                    <i class="bi bi-check-circle-fill text-success"></i>
+                <bx:else>
+                    <i class="bi bi-circle text-body-secondary"></i>
+                </bx:if>
+                #encodeForHTML( local.s.getTitle() )#
+            </h1>
+            <div class="d-flex gap-2 align-items-center text-body-secondary small">
+                <bx:if !!local.s.getIsCompleted()>
+                    <span class="badge text-bg-success"><i class="bi bi-check-circle"></i> completed</span>
+                </bx:if>
+                <bx:if len( toString( local.s.getDueDate() ?: "" ) )>
+                    <span>due #toString( local.s.getDueDate() )#</span>
+                </bx:if>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="/agent/pm/subtasks/#encodeForURL( local.s.getId() )#/edit"><i class="bi bi-pencil"></i> Edit</a>
+            <bx:if !!local.s.getIsCompleted()>
+                <form method="post" action="/agent/pm/subtasks/#encodeForURL( local.s.getId() )#/reopen" class="d-inline">
+                    <button class="btn btn-outline-secondary" type="submit"><i class="bi bi-arrow-counterclockwise"></i> Reopen</button>
+                </form>
+            <bx:else>
+                <form method="post" action="/agent/pm/subtasks/#encodeForURL( local.s.getId() )#/complete" class="d-inline">
+                    <button class="btn btn-outline-success" type="submit"><i class="bi bi-check-lg"></i> Mark complete</button>
+                </form>
+            </bx:if>
+            <form method="post" action="/agent/pm/subtasks/#encodeForURL( local.s.getId() )#/delete" class="d-inline"
+                onsubmit="return confirm( 'Soft-delete this subtask?' );">
+                <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash"></i> Delete</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-8">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="h5 mb-2">Description</h2>
+                    <bx:if len( local.s.getDescription() ?: "" )>
+                        <p class="mb-0" style="white-space: pre-wrap;">#encodeForHTML( local.s.getDescription() )#</p>
+                    <bx:else>
+                        <p class="text-body-secondary mb-0 fst-italic">No description.</p>
+                    </bx:if>
+                </div>
+            </div>
+
+            <bx:if !isNull( local.project )>
+                <div class="mt-3">
+                    #wire(
+                        name   = "TimeLogger@tesserabx-pm",
+                        params = {
+                            loggableType   : "subtask",
+                            loggableId     : local.s.getId(),
+                            organizationId : local.s.getOrganizationId(),
+                            projectId      : local.project.getId()
+                        }
+                    )#
+                </div>
+            </bx:if>
+        </div>
+
+        <div class="col-12 col-lg-4">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="h6 mb-3">Details</h2>
+                    <dl class="row mb-0 small">
+                        <dt class="col-5">Assignee</dt>
+                        <dd class="col-7">
+                            <bx:if len( local.s.getAssigneeId() ?: "" )>
+                                <span class="badge text-bg-secondary">#encodeForHTML( local.s.getAssigneeType() )#</span>
+                                <code>#encodeForHTML( left( local.s.getAssigneeId(), 8 ) )#…</code>
+                            <bx:else>
+                                <span class="text-body-secondary fst-italic">unassigned</span>
+                            </bx:if>
+                        </dd>
+
+                        <dt class="col-5">Due</dt>
+                        <dd class="col-7">#toString( local.s.getDueDate() ?: "" )#</dd>
+
+                        <dt class="col-5">Estimated</dt>
+                        <dd class="col-7"><bx:if isNumeric( local.s.getEstimatedHours() ?: "" )>#local.s.getEstimatedHours()#h<bx:else>—</bx:if></dd>
+
+                        <dt class="col-5">Completed at</dt>
+                        <dd class="col-7">#toString( local.s.getCompletedAt() ?: "" )#</dd>
+
+                        <dt class="col-5">Created</dt>
+                        <dd class="col-7">#toString( local.s.getCreatedAt() ?: "" )#</dd>
+
+                        <dt class="col-5">Updated</dt>
+                        <dd class="col-7">#toString( local.s.getUpdatedAt() ?: "" )#</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

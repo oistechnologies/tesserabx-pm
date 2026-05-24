@@ -77,6 +77,27 @@ class {
     }
 
     // ---------------------------------------------------------------
+    // Show
+    // ---------------------------------------------------------------
+
+    function show( event, rc, prc ){
+        var subtask = subtaskService.getSubtask( rc.id ?: "" );
+        if ( isNull( subtask ) ) {
+            messagebox.warn( "That subtask does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        var task    = taskService.getTask( subtask.getTaskId() );
+        var project = isNull( task ) ? javaCast( "null", "" ) : projectService.getProject( task.getProjectId() );
+
+        prc.pageTitle = subtask.getTitle();
+        prc.subtask   = subtask;
+        prc.task      = task;
+        prc.project   = project;
+        event.setView( view = "subtasks/show", module = "tesserabx-pm" );
+    }
+
+    // ---------------------------------------------------------------
     // Edit / Update / Complete / Reopen / Remove
     // ---------------------------------------------------------------
 

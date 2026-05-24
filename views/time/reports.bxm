@@ -1,0 +1,14 @@
+<bx:output>
+<div class="container-fluid">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/agent/pm" class="link-secondary">PM</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Time reports</li>
+        </ol>
+    </nav>
+
+    <h1 class="mb-3 fs-3">Time reports</h1>
+
+    #wire( name = "TimeReport@tesserabx-pm" )#
+</div>
+</bx:output>

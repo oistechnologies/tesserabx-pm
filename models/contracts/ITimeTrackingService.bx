@@ -1,0 +1,35 @@
+/**
+ * ITimeTrackingService: documentation contract for the time-tracking
+ * service. Cross-module callers code against this interface; the live
+ * binding `TimeTrackingService@tesserabx-pm` implements it.
+ *
+ * The contract is shape-only; throws on instantiation so the service
+ * registry stays the source of truth.
+ *
+ * Methods (live signatures on TimeTrackingService):
+ *
+ *   any     getTimeLog( id )
+ *   array   listForLoggable( loggableType, loggableId )
+ *   array   listLogs( filter )
+ *   struct  totalsForLoggable( loggableType, loggableId )
+ *   struct  totalsForTask( taskId )
+ *   struct  totalsForProject( projectId )
+ *   array   totalsByUser( filter )
+ *   array   totalsByProject( filter )
+ *   any     createTimeLog( data )
+ *   any     updateTimeLog( id, data )
+ *   any     removeTimeLog( id )
+ *   boolean isEnabledForProject( projectId )
+ *   string  projectIdForLoggable( loggableType, loggableId )
+ *   struct  weeklyForAgent( agentId )
+ */
+class {
+
+    function init(){
+        throw(
+            type    = "ITimeTrackingService.DoNotInstantiate",
+            message = "ITimeTrackingService is a documentation contract. Inject TimeTrackingService@tesserabx-pm instead."
+        );
+    }
+
+}

@@ -1,0 +1,132 @@
+/**
+ * TimeLogger: time-entry composer + log list embedded on Task and
+ * Subtask detail pages.
+ *
+ * BUILD-PLAN §3.7: time tracking is per-project opt-in. The wire
+ * renders a "disabled for this project" notice when the project's
+ * time_tracking_enabled flag is off; the composer is hidden and any
+ * existing rows are still shown (read-only history).
+ *
+ * Embed from views/tasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "TimeLogger@tesserabx-pm",
+ *       params = {
+ *           loggableType   : "task",            // or "subtask"
+ *           loggableId     : prc.task.getId(),
+ *           organizationId : prc.task.getOrganizationId(),
+ *           projectId      : prc.project.getId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="timeService" inject="TimeTrackingService@tesserabx-pm";
+    property name="auth"        inject="AuthenticationService@cbauth";
+
+    data = {
+        "loggableType"   : "",
+        "loggableId"     : "",
+        "organizationId" : "",
+        "projectId"      : "",
+        "hours"          : "",
+        "description"    : "",
+        "isBillable"     : false,
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.loggableType   = arguments.params.loggableType   ?: "";
+        data.loggableId     = arguments.params.loggableId     ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+        data.projectId      = arguments.params.projectId      ?: "";
+    }
+
+    // ---------- Server-side helpers ----------
+
+    function logs(){
+        if ( !len( data.loggableType ) || !len( data.loggableId ) ) return [];
+        return timeService.listForLoggable( data.loggableType, data.loggableId );
+    }
+
+    function totals(){
+        if ( !len( data.loggableType ) || !len( data.loggableId ) ) {
+            return { totalHours : 0, billableHours : 0 };
+        }
+        return timeService.totalsForLoggable( data.loggableType, data.loggableId );
+    }
+
+    function enabled(){
+        if ( !len( data.projectId ) ) return false;
+        return timeService.isEnabledForProject( data.projectId );
+    }
+
+    function viewer(){
+        return { accountType : "agent", accountId : currentAgentId() };
+    }
+
+    // ---------- Actions ----------
+
+    function post(){
+        if ( !len( data.loggableType ) || !len( data.loggableId ) ) {
+            notice( "Cannot log time; loggable not bound.", "danger" );
+            return;
+        }
+        if ( !isNumeric( data.hours ?: "" ) || data.hours <= 0 ) {
+            notice( "Enter a positive number of hours.", "warning" );
+            return;
+        }
+        try {
+            timeService.createTimeLog( {
+                loggableType   : data.loggableType,
+                loggableId     : data.loggableId,
+                organizationId : data.organizationId,
+                userType       : "agent",
+                userId         : currentAgentId(),
+                hours          : data.hours,
+                description    : trim( data.description ?: "" ),
+                isBillable     : !!data.isBillable
+            } );
+            data.hours       = "";
+            data.description = "";
+            notice( "Time logged.", "success" );
+        } catch ( any e ) {
+            notice( "Could not log time: " & e.message, "danger" );
+        }
+    }
+
+    function deleteLog( id ){
+        try {
+            var log = timeService.getTimeLog( arguments.id ?: "" );
+            if ( isNull( log ) ) return;
+            // Only the original user can delete their own row.
+            var me = viewer();
+            if ( log.getUserType() != me.accountType || log.getUserId() != me.accountId ) {
+                notice( "You can only delete your own entries.", "warning" );
+                return;
+            }
+            timeService.removeTimeLog( arguments.id );
+            notice( "Time entry removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove entry: " & e.message, "danger" );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

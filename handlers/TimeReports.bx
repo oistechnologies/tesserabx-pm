@@ -1,0 +1,19 @@
+/**
+ * Agent-surface TimeReports handler.
+ *
+ * Single action /agent/pm/time-reports that mounts the TimeReport
+ * CBWire. The wire owns the filters, queries, and rendering. The
+ * handler is a thin route + layout glue.
+ */
+class {
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Time reports";
+        event.setView( view = "time/reports", module = "tesserabx-pm" );
+    }
+
+}

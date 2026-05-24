@@ -1,0 +1,29 @@
+/**
+ * TimeLogDto: snake-case shape for pm_time_logs rows on the wire.
+ */
+class singleton=true {
+
+    public struct function fromTimeLog( required any t ){
+        return {
+            id              : arguments.t.getId(),
+            organization_id : arguments.t.getOrganizationId(),
+            loggable_type   : arguments.t.getLoggableType(),
+            loggable_id     : arguments.t.getLoggableId(),
+            user_type       : arguments.t.getUserType(),
+            user_id         : arguments.t.getUserId(),
+            hours           : arguments.t.getHours(),
+            logged_at       : isDate( arguments.t.getLoggedAt() ) ? dateTimeFormat( arguments.t.getLoggedAt(), "iso" ) : "",
+            description     : arguments.t.getDescription() ?: "",
+            is_billable     : !!arguments.t.getIsBillable(),
+            created_at      : isDate( arguments.t.getCreatedAt() ) ? dateTimeFormat( arguments.t.getCreatedAt(), "iso" ) : "",
+            updated_at      : isDate( arguments.t.getUpdatedAt() ) ? dateTimeFormat( arguments.t.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromTimeLogArray( required array logs ){
+        var out = [];
+        for ( var t in arguments.logs ) out.append( fromTimeLog( t ) );
+        return out;
+    }
+
+}

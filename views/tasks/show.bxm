@@ -68,6 +68,18 @@
 
 			<div class="mt-3">
 				#wire(
+					name   = "TimeLogger@tesserabx-pm",
+					params = {
+						loggableType   : "task",
+						loggableId     : local.t.getId(),
+						organizationId : local.t.getOrganizationId(),
+						projectId      : local.project.getId()
+					}
+				)#
+			</div>
+
+			<div class="mt-3">
+				#wire(
 					name   = "TaskEventFeed@tesserabx-pm",
 					params = {
 						taskId         : local.t.getId(),
@@ -98,9 +110,11 @@
 												<button class="btn btn-link btn-sm p-0 text-body-secondary" type="submit" title="Mark complete"><i class="bi bi-circle"></i></button>
 											</form>
 										</bx:if>
-										<span <bx:if !!st.getIsCompleted()>class="text-decoration-line-through text-body-secondary"</bx:if>>
-											#encodeForHTML( st.getTitle() )#
-										</span>
+										<a href="/agent/pm/subtasks/#encodeForURL( st.getId() )#" class="text-decoration-none text-reset">
+											<span <bx:if !!st.getIsCompleted()>class="text-decoration-line-through text-body-secondary"</bx:if>>
+												#encodeForHTML( st.getTitle() )#
+											</span>
+										</a>
 										<bx:if len( toString( st.getDueDate() ?: "" ) )>
 											<small class="text-body-secondary">due #toString( st.getDueDate() )#</small>
 										</bx:if>

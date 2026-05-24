@@ -1,0 +1,28 @@
+<bx:output>
+<bx:script>
+    // Host dashboard renderer calls the manifest's dataProvider /
+    // dataMethod and hands the result to this partial as `data`.
+    local.d = data ?: { totalHours : 0, billableHours : 0, weekStart : "", weekEnd : "" };
+</bx:script>
+
+<div class="card h-100">
+    <div class="card-body">
+        <h2 class="h6 mb-2 text-body-secondary">
+            <i class="bi bi-stopwatch"></i> Time this week
+        </h2>
+        <div class="display-6 mb-1">#numberFormat( local.d.totalHours ?: 0, "0.00" )#<span class="fs-6 text-body-secondary"> h</span></div>
+        <bx:if ( local.d.billableHours ?: 0 ) gt 0>
+            <div class="small text-success">
+                <i class="bi bi-currency-dollar"></i>
+                #numberFormat( local.d.billableHours, "0.00" )# h billable
+            </div>
+        </bx:if>
+        <bx:if len( local.d.weekStart ?: "" )>
+            <div class="small text-body-secondary mt-2">
+                #encodeForHTML( local.d.weekStart )# &mdash; #encodeForHTML( local.d.weekEnd )#
+            </div>
+        </bx:if>
+        <a href="/agent/pm/time-reports" class="stretched-link" aria-label="Open time reports"></a>
+    </div>
+</div>
+</bx:output>

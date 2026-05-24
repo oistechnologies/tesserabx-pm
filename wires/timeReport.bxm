@@ -1,0 +1,145 @@
+<bx:output>
+<bx:script>
+    local.rows     = rows();
+    local.totals   = grandTotal();
+    local.mode     = data.grouping ?: "user";
+    local.projects = projects();
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+    <div class="card mb-3">
+        <div class="card-body">
+            <h2 class="h6 mb-3">Filters</h2>
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label small mb-0" for="tr-project">Project</label>
+                    <select id="tr-project" class="form-select form-select-sm" wire:model.live="projectId">
+                        <option value="">All projects</option>
+                        <bx:loop array="#local.projects#" item="p">
+                            <option value="#encodeForHTMLAttribute( p.getId() )#">#encodeForHTML( p.getName() )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-0" for="tr-utype">User type</label>
+                    <select id="tr-utype" class="form-select form-select-sm" wire:model.live="userType">
+                        <option value="">Any</option>
+                        <option value="agent">Agent</option>
+                        <option value="contact">Contact</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-0" for="tr-uid">User ID</label>
+                    <input id="tr-uid" type="text" class="form-control form-control-sm" wire:model.live.debounce.500ms="userId" placeholder="UUID (optional)">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-0" for="tr-from">From</label>
+                    <input id="tr-from" type="date" class="form-control form-control-sm" wire:model.live="fromDate">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-0" for="tr-to">To</label>
+                    <input id="tr-to" type="date" class="form-control form-control-sm" wire:model.live="toDate">
+                </div>
+
+                <div class="col-6 col-md-2 mt-2">
+                    <label class="form-label small mb-0" for="tr-bill">Billable</label>
+                    <select id="tr-bill" class="form-select form-select-sm" wire:model.live="billableOnly">
+                        <option value="">Both</option>
+                        <option value="yes">Billable only</option>
+                        <option value="no">Non-billable only</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 mt-2">
+                    <label class="form-label small mb-0" for="tr-group">Group by</label>
+                    <select id="tr-group" class="form-select form-select-sm" wire:model.live="grouping">
+                        <option value="user">User</option>
+                        <option value="project">Project</option>
+                        <option value="list">Raw list</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2 mt-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100" wire:click="clear()">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="h5 mb-0">Totals</h2>
+                <div>
+                    <span class="badge text-bg-secondary">#numberFormat( local.totals.totalHours, "0.00" )#h total</span>
+                    <span class="badge text-bg-success ms-1"><i class="bi bi-currency-dollar"></i>#numberFormat( local.totals.billableHours, "0.00" )#h billable</span>
+                </div>
+            </div>
+
+            <bx:if !arrayLen( local.rows )>
+                <p class="text-body-secondary fst-italic mb-0">No matching time entries.</p>
+            <bx:elseif local.mode eq "list">
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr>
+                            <th>Logged at</th>
+                            <th>User</th>
+                            <th>Loggable</th>
+                            <th class="text-end">Hours</th>
+                            <th>Billable</th>
+                            <th>Note</th>
+                        </tr></thead>
+                        <tbody>
+                            <bx:loop array="#local.rows#" item="t">
+                                <tr>
+                                    <td class="small">#dateTimeFormat( t.getLoggedAt(), "yyyy-mm-dd HH:nn" )#</td>
+                                    <td class="small">
+                                        <span class="badge text-bg-light border">#encodeForHTML( t.getUserType() )#</span>
+                                        <code class="ms-1">#encodeForHTML( left( t.getUserId(), 8 ) )#…</code>
+                                    </td>
+                                    <td class="small">
+                                        <span class="badge text-bg-light border">#encodeForHTML( t.getLoggableType() )#</span>
+                                        <code class="ms-1">#encodeForHTML( left( t.getLoggableId(), 8 ) )#…</code>
+                                    </td>
+                                    <td class="text-end">#numberFormat( t.getHours(), "0.00" )#</td>
+                                    <td>
+                                        <bx:if !!t.getIsBillable()>
+                                            <span class="badge text-bg-success"><i class="bi bi-currency-dollar"></i></span>
+                                        <bx:else>—</bx:if>
+                                    </td>
+                                    <td class="small text-body-secondary">#encodeForHTML( t.getDescription() ?: "" )#</td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            <bx:else>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr>
+                            <th>#local.mode eq "project" ? "Project" : "User"#</th>
+                            <th class="text-end">Total</th>
+                            <th class="text-end">Billable</th>
+                        </tr></thead>
+                        <tbody>
+                            <bx:loop array="#local.rows#" item="r">
+                                <tr>
+                                    <td>
+                                        <bx:if local.mode eq "project">
+                                            <code>#encodeForHTML( left( r.projectId, 8 ) )#…</code>
+                                        <bx:else>
+                                            <code>#encodeForHTML( r.key )#</code>
+                                        </bx:if>
+                                    </td>
+                                    <td class="text-end">#numberFormat( r.totalHours, "0.00" )#h</td>
+                                    <td class="text-end">#numberFormat( r.billableHours, "0.00" )#h</td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            </bx:if>
+        </div>
+    </div>
+</div>
+</bx:output>

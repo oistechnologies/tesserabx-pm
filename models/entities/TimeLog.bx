@@ -25,7 +25,7 @@ class
     property name="userType"         column="user_type";
     property name="userId"           column="user_id";
 
-    property name="hours";
+    property name="hours" sqltype="decimal";
     property name="loggedAt"         column="logged_at" sqltype="timestamp";
     property name="description";
     property name="isBillable"       column="is_billable";

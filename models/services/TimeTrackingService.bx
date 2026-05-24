@@ -1,0 +1,458 @@
+/**
+ * TimeTrackingService: CRUD + rollups for pm_time_logs.
+ *
+ * Time tracking is per-project opt-in via pm_projects.time_tracking_enabled
+ * (BUILD-PLAN §3.7). createTimeLog refuses to write when the owning
+ * project has the flag off; the TimeLogger CBWire also hides itself
+ * server-side via isEnabledForProject(...).
+ *
+ * Polymorphic over Task and Subtask (`loggable_type` + `loggable_id`)
+ * and over Agent / Contact (`user_type` + `user_id`). Either account
+ * family may log time if the project allows.
+ *
+ * Rollups are SQL-only, not entity-walking, so they survive the
+ * announce thread context (same workaround pattern as
+ * ProjectEventService). Subtask hours roll up to their parent task
+ * for `totalsForTask`; both task-direct and subtask-via-task hours
+ * roll up to the project for `totalsForProject`.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_LOGGABLE_TYPES = [ "task", "subtask" ];
+    variables.VALID_USER_TYPES     = [ "agent", "contact" ];
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    public any function getTimeLog( required string id ){
+        var t = wirebox.getInstance( "TimeLog@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .whereNull( "deleted_at" )
+            .first();
+        return isNull( t ) ? javaCast( "null", "" ) : t;
+    }
+
+    /**
+     * List logs against a single loggable (task or subtask). Used by
+     * the TimeLogger CBWire to render the per-row history.
+     */
+    public array function listForLoggable(
+        required string loggableType,
+        required string loggableId
+    ){
+        return wirebox.getInstance( "TimeLog@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "loggable_type", arguments.loggableType )
+            .where( "loggable_id",   arguments.loggableId )
+            .whereNull( "deleted_at" )
+            .orderBy( "logged_at", "desc" )
+            .get();
+    }
+
+    /**
+     * Filtered report query. Filters accepted:
+     *   organizationId, projectId, userType, userId, fromDate, toDate,
+     *   isBillable (boolean | null), loggableType.
+     * Returns Quick TimeLog entities ordered by logged_at desc.
+     */
+    public array function listLogs( struct filter = {} ){
+        var q = wirebox.getInstance( "TimeLog@tesserabx-pm" )
+            .withoutGlobalScope()
+            .whereNull( "deleted_at" );
+
+        if ( len( arguments.filter.organizationId ?: "" ) ) q.where( "organization_id", arguments.filter.organizationId );
+        if ( len( arguments.filter.userType       ?: "" ) ) q.where( "user_type",       arguments.filter.userType );
+        if ( len( arguments.filter.userId         ?: "" ) ) q.where( "user_id",         arguments.filter.userId );
+        if ( len( arguments.filter.loggableType   ?: "" ) ) q.where( "loggable_type",   arguments.filter.loggableType );
+        if ( len( arguments.filter.fromDate       ?: "" ) ) q.where( "logged_at", ">=", arguments.filter.fromDate );
+        if ( len( arguments.filter.toDate         ?: "" ) ) q.where( "logged_at", "<=", arguments.filter.toDate );
+        if ( structKeyExists( arguments.filter, "isBillable" ) && !isNull( arguments.filter.isBillable ) ) {
+            q.where( "is_billable", !!arguments.filter.isBillable );
+        }
+        if ( len( arguments.filter.projectId ?: "" ) ) {
+            // project scope: either logged directly on a task in the
+            // project, or on a subtask whose parent task is in the
+            // project.
+            var ids = idsForProject( arguments.filter.projectId );
+            if ( !arrayLen( ids.taskIds ) && !arrayLen( ids.subtaskIds ) ) return [];
+            q.where( function( q2 ){
+                var any = false;
+                if ( arrayLen( ids.taskIds ) ) {
+                    q2.where( function( q3 ){
+                        q3.where( "loggable_type", "task" ).whereIn( "loggable_id", ids.taskIds );
+                    } );
+                    any = true;
+                }
+                if ( arrayLen( ids.subtaskIds ) ) {
+                    if ( any ) {
+                        q2.orWhere( function( q3 ){
+                            q3.where( "loggable_type", "subtask" ).whereIn( "loggable_id", ids.subtaskIds );
+                        } );
+                    } else {
+                        q2.where( function( q3 ){
+                            q3.where( "loggable_type", "subtask" ).whereIn( "loggable_id", ids.subtaskIds );
+                        } );
+                    }
+                }
+            } );
+        }
+
+        return q.orderBy( "logged_at", "desc" ).limit( 1000 ).get();
+    }
+
+    // ---------------------------------------------------------------
+    // Rollups (raw SQL: faster + safe across thread contexts)
+    // ---------------------------------------------------------------
+
+    public struct function totalsForLoggable(
+        required string loggableType,
+        required string loggableId
+    ){
+        var r = queryExecute(
+            "SELECT
+                COALESCE( SUM( hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN is_billable THEN hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs
+             WHERE  loggable_type = :lt
+               AND  loggable_id   = :lid
+               AND  deleted_at IS NULL",
+            { lt : arguments.loggableType, lid : arguments.loggableId }
+        );
+        return {
+            totalHours    : r.total_hours[ 1 ],
+            billableHours : r.billable_hours[ 1 ]
+        };
+    }
+
+    /**
+     * Task rollup: direct task hours PLUS all hours logged against
+     * its subtasks.
+     */
+    public struct function totalsForTask( required string taskId ){
+        var r = queryExecute(
+            "SELECT
+                COALESCE( SUM( hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN is_billable THEN hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs
+             WHERE  deleted_at IS NULL
+               AND  (
+                    ( loggable_type = 'task'    AND loggable_id  = :tid )
+                 OR ( loggable_type = 'subtask' AND loggable_id IN (
+                        SELECT id FROM pm_subtasks WHERE task_id = :tid AND deleted_at IS NULL
+                    ) )
+               )",
+            { tid : arguments.taskId }
+        );
+        return {
+            totalHours    : r.total_hours[ 1 ],
+            billableHours : r.billable_hours[ 1 ]
+        };
+    }
+
+    /**
+     * Project rollup: every hour logged against any task or subtask
+     * belonging to the project.
+     */
+    public struct function totalsForProject( required string projectId ){
+        var r = queryExecute(
+            "SELECT
+                COALESCE( SUM( hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN is_billable THEN hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs
+             WHERE  deleted_at IS NULL
+               AND  (
+                    ( loggable_type = 'task'    AND loggable_id  IN (
+                        SELECT id FROM pm_tasks WHERE project_id = :pid AND deleted_at IS NULL
+                    ) )
+                 OR ( loggable_type = 'subtask' AND loggable_id IN (
+                        SELECT s.id FROM pm_subtasks s
+                        JOIN   pm_tasks    t ON t.id = s.task_id
+                        WHERE  t.project_id = :pid
+                          AND  s.deleted_at IS NULL
+                          AND  t.deleted_at IS NULL
+                    ) )
+               )",
+            { pid : arguments.projectId }
+        );
+        return {
+            totalHours    : r.total_hours[ 1 ],
+            billableHours : r.billable_hours[ 1 ]
+        };
+    }
+
+    /**
+     * Group-by report helpers. Each returns an array of structs
+     * shaped for the TimeReport CBWire's table renderer.
+     */
+    public array function totalsByUser( struct filter = {} ){
+        return groupBy( arguments.filter, "user_type, user_id" );
+    }
+
+    public array function totalsByProject( struct filter = {} ){
+        // Project rollup needs a join through task/subtask back to
+        // project id. We compute task-direct + subtask-via-task in
+        // two passes and merge in BoxLang.
+        var byTask = queryExecute(
+            "SELECT
+                pt.project_id AS project_id,
+                COALESCE( SUM( tl.hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN tl.is_billable THEN tl.hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs tl
+             JOIN   pm_tasks pt ON pt.id = tl.loggable_id
+             WHERE  tl.loggable_type = 'task'
+               AND  tl.deleted_at IS NULL
+               AND  pt.deleted_at IS NULL
+               #buildExtraSql( arguments.filter, "tl" )#
+             GROUP BY pt.project_id",
+            buildBindings( arguments.filter )
+        );
+        var bySubtask = queryExecute(
+            "SELECT
+                pt.project_id AS project_id,
+                COALESCE( SUM( tl.hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN tl.is_billable THEN tl.hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs tl
+             JOIN   pm_subtasks  ps ON ps.id = tl.loggable_id
+             JOIN   pm_tasks     pt ON pt.id = ps.task_id
+             WHERE  tl.loggable_type = 'subtask'
+               AND  tl.deleted_at IS NULL
+               AND  ps.deleted_at IS NULL
+               AND  pt.deleted_at IS NULL
+               #buildExtraSql( arguments.filter, "tl" )#
+             GROUP BY pt.project_id",
+            buildBindings( arguments.filter )
+        );
+        var merged = {};
+        var pushRow = ( row ) => {
+            if ( !structKeyExists( merged, row.project_id ) ) {
+                merged[ row.project_id ] = { projectId : row.project_id, totalHours : 0, billableHours : 0 };
+            }
+            merged[ row.project_id ].totalHours    += row.total_hours;
+            merged[ row.project_id ].billableHours += row.billable_hours;
+        };
+        for ( var i = 1; i <= byTask.recordCount;    i++ ) pushRow( queryRowData( byTask,    i ) );
+        for ( var i = 1; i <= bySubtask.recordCount; i++ ) pushRow( queryRowData( bySubtask, i ) );
+
+        var out = [];
+        for ( var k in merged ) out.append( merged[ k ] );
+        arraySort( out, function( a, b ){ return b.totalHours - a.totalHours; } );
+        return out;
+    }
+
+    // ---------------------------------------------------------------
+    // Mutations
+    // ---------------------------------------------------------------
+
+    public any function createTimeLog( required struct data ){
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "TimeTrackingService.MissingField", message = "organizationId is required." );
+        if ( !len( arguments.data.loggableType   ?: "" ) ) throw( type = "TimeTrackingService.MissingField", message = "loggableType is required." );
+        if ( !len( arguments.data.loggableId     ?: "" ) ) throw( type = "TimeTrackingService.MissingField", message = "loggableId is required." );
+        if ( !len( arguments.data.userType       ?: "" ) ) throw( type = "TimeTrackingService.MissingField", message = "userType is required." );
+        if ( !len( arguments.data.userId         ?: "" ) ) throw( type = "TimeTrackingService.MissingField", message = "userId is required." );
+        if ( !isNumeric( arguments.data.hours    ?: "" ) ) throw( type = "TimeTrackingService.MissingField", message = "hours must be numeric." );
+        if ( arguments.data.hours <= 0 )                   throw( type = "TimeTrackingService.InvalidHours", message = "hours must be greater than zero." );
+
+        if ( !arrayContains( variables.VALID_LOGGABLE_TYPES, arguments.data.loggableType ) ) {
+            throw( type = "TimeTrackingService.InvalidLoggable", message = "loggableType must be one of #arrayToList( variables.VALID_LOGGABLE_TYPES )# (got [#arguments.data.loggableType#])." );
+        }
+        if ( !arrayContains( variables.VALID_USER_TYPES, arguments.data.userType ) ) {
+            throw( type = "TimeTrackingService.InvalidUser", message = "userType must be one of #arrayToList( variables.VALID_USER_TYPES )# (got [#arguments.data.userType#])." );
+        }
+
+        var projectId = projectIdForLoggable( arguments.data.loggableType, arguments.data.loggableId );
+        if ( !len( projectId ) ) {
+            throw( type = "TimeTrackingService.UnknownLoggable", message = "Could not resolve project for [#arguments.data.loggableType# #arguments.data.loggableId#]." );
+        }
+        if ( !isEnabledForProject( projectId ) ) {
+            throw( type = "TimeTrackingService.TrackingDisabled", message = "Time tracking is disabled for the owning project." );
+        }
+
+        var log = wirebox.getInstance( "TimeLog@tesserabx-pm" );
+        log.setId(             createUUID() );
+        log.setOrganizationId( arguments.data.organizationId );
+        log.setLoggableType(   arguments.data.loggableType );
+        log.setLoggableId(     arguments.data.loggableId );
+        log.setUserType(       arguments.data.userType );
+        log.setUserId(         arguments.data.userId );
+        log.setHours(          arguments.data.hours );
+        log.setLoggedAt(       len( arguments.data.loggedAt ?: "" ) ? arguments.data.loggedAt : now() );
+        log.setDescription(    arguments.data.description ?: "" );
+        log.setIsBillable(     !!( arguments.data.isBillable ?: false ) );
+        log.save();
+        return log;
+    }
+
+    public any function updateTimeLog( required string id, required struct data ){
+        var log = getTimeLog( arguments.id );
+        if ( isNull( log ) ) throw( type = "TimeTrackingService.UnknownLog", message = "No time log with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "hours" ) ) {
+            if ( !isNumeric( arguments.data.hours ) || arguments.data.hours <= 0 ) {
+                throw( type = "TimeTrackingService.InvalidHours", message = "hours must be a positive number." );
+            }
+            log.setHours( arguments.data.hours );
+        }
+        if ( structKeyExists( arguments.data, "loggedAt"    ) && len( arguments.data.loggedAt ) ) log.setLoggedAt(    arguments.data.loggedAt );
+        if ( structKeyExists( arguments.data, "description" ) )                                   log.setDescription( arguments.data.description );
+        if ( structKeyExists( arguments.data, "isBillable"  ) )                                   log.setIsBillable(  !!arguments.data.isBillable );
+        log.save();
+        return log;
+    }
+
+    public any function removeTimeLog( required string id ){
+        var log = getTimeLog( arguments.id );
+        if ( isNull( log ) ) throw( type = "TimeTrackingService.UnknownLog", message = "No time log with id [#arguments.id#]." );
+        log.setDeletedAt( now() );
+        log.save();
+        return log;
+    }
+
+    // ---------------------------------------------------------------
+    // Public helpers used by the CBWires
+    // ---------------------------------------------------------------
+
+    public boolean function isEnabledForProject( required string projectId ){
+        var r = queryExecute(
+            "SELECT time_tracking_enabled FROM pm_projects WHERE id = :id",
+            { id : arguments.projectId }
+        );
+        return r.recordCount && !!r.time_tracking_enabled[ 1 ];
+    }
+
+    public string function projectIdForLoggable(
+        required string loggableType,
+        required string loggableId
+    ){
+        if ( !len( arguments.loggableId ) ) return "";
+        switch ( arguments.loggableType ) {
+            case "task":
+                var r = queryExecute(
+                    "SELECT project_id FROM pm_tasks WHERE id = :id",
+                    { id : arguments.loggableId }
+                );
+                return r.recordCount ? r.project_id[ 1 ] : "";
+            case "subtask":
+                var r2 = queryExecute(
+                    "SELECT t.project_id AS pid
+                     FROM   pm_subtasks s
+                     JOIN   pm_tasks    t ON t.id = s.task_id
+                     WHERE  s.id = :id",
+                    { id : arguments.loggableId }
+                );
+                return r2.recordCount ? r2.pid[ 1 ] : "";
+        }
+        return "";
+    }
+
+    /**
+     * Dashboard widget feed: hours an agent has logged in the
+     * current calendar week (Mon..Sun, ISO).
+     */
+    public struct function weeklyForAgent( required string agentId ){
+        var weekStart = dateAdd( "d", -( dayOfWeek( now() ) - 2 ), now() ); // Monday
+        var weekEnd   = dateAdd( "d", 6, weekStart );
+        var r = queryExecute(
+            "SELECT
+                COALESCE( SUM( hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN is_billable THEN hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs
+             WHERE  user_type = 'agent'
+               AND  user_id   = :uid
+               AND  logged_at BETWEEN :s AND :e
+               AND  deleted_at IS NULL",
+            {
+                uid : arguments.agentId,
+                s   : dateFormat( weekStart, "yyyy-mm-dd" ) & " 00:00:00",
+                e   : dateFormat( weekEnd,   "yyyy-mm-dd" ) & " 23:59:59"
+            }
+        );
+        return {
+            agentId       : arguments.agentId,
+            weekStart     : dateFormat( weekStart, "yyyy-mm-dd" ),
+            weekEnd       : dateFormat( weekEnd,   "yyyy-mm-dd" ),
+            totalHours    : r.total_hours[ 1 ],
+            billableHours : r.billable_hours[ 1 ]
+        };
+    }
+
+    // ---------- internals ----------
+
+    private struct function idsForProject( required string projectId ){
+        var taskRows = queryExecute(
+            "SELECT id FROM pm_tasks WHERE project_id = :pid AND deleted_at IS NULL",
+            { pid : arguments.projectId }
+        );
+        var subtaskRows = queryExecute(
+            "SELECT s.id
+             FROM   pm_subtasks s
+             JOIN   pm_tasks    t ON t.id = s.task_id
+             WHERE  t.project_id = :pid
+               AND  s.deleted_at IS NULL
+               AND  t.deleted_at IS NULL",
+            { pid : arguments.projectId }
+        );
+        var taskIds = [];
+        var subIds  = [];
+        for ( var i = 1; i <= taskRows.recordCount;    i++ ) taskIds.append( taskRows.id[ i ] );
+        for ( var i = 1; i <= subtaskRows.recordCount; i++ ) subIds.append(  subtaskRows.id[ i ] );
+        return { taskIds : taskIds, subtaskIds : subIds };
+    }
+
+    private array function groupBy( required struct filter, required string groupSql ){
+        var sql = "SELECT
+                #arguments.groupSql# AS grp,
+                COALESCE( SUM( hours ),                                       0 ) AS total_hours,
+                COALESCE( SUM( CASE WHEN is_billable THEN hours ELSE 0 END ), 0 ) AS billable_hours
+             FROM   pm_time_logs
+             WHERE  deleted_at IS NULL
+               #buildExtraSql( arguments.filter, "pm_time_logs" )#
+             GROUP BY #arguments.groupSql#
+             ORDER BY total_hours DESC";
+        var rows = queryExecute( sql, buildBindings( arguments.filter ) );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                key           : rows.grp[ i ],
+                totalHours    : rows.total_hours[ i ],
+                billableHours : rows.billable_hours[ i ]
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Compose the WHERE fragments shared by the report queries.
+     * `prefix` is the table alias (or table name) on the time_logs
+     * row to qualify column names against.
+     */
+    private string function buildExtraSql( required struct filter, required string prefix ){
+        var clauses = [];
+        if ( len( arguments.filter.organizationId ?: "" ) ) clauses.append( "AND #arguments.prefix#.organization_id = :organizationId" );
+        if ( len( arguments.filter.userType       ?: "" ) ) clauses.append( "AND #arguments.prefix#.user_type       = :userType" );
+        if ( len( arguments.filter.userId         ?: "" ) ) clauses.append( "AND #arguments.prefix#.user_id         = :userId" );
+        if ( len( arguments.filter.fromDate       ?: "" ) ) clauses.append( "AND #arguments.prefix#.logged_at      >= :fromDate" );
+        if ( len( arguments.filter.toDate         ?: "" ) ) clauses.append( "AND #arguments.prefix#.logged_at      <= :toDate" );
+        if ( structKeyExists( arguments.filter, "isBillable" ) && !isNull( arguments.filter.isBillable ) && len( arguments.filter.isBillable ) ) {
+            clauses.append( "AND #arguments.prefix#.is_billable = :isBillable" );
+        }
+        return clauses.toList( " " );
+    }
+
+    private struct function buildBindings( required struct filter ){
+        var b = {};
+        if ( len( arguments.filter.organizationId ?: "" ) ) b.organizationId = arguments.filter.organizationId;
+        if ( len( arguments.filter.userType       ?: "" ) ) b.userType       = arguments.filter.userType;
+        if ( len( arguments.filter.userId         ?: "" ) ) b.userId         = arguments.filter.userId;
+        if ( len( arguments.filter.fromDate       ?: "" ) ) b.fromDate       = arguments.filter.fromDate;
+        if ( len( arguments.filter.toDate         ?: "" ) ) b.toDate         = arguments.filter.toDate;
+        if ( structKeyExists( arguments.filter, "isBillable" ) && !isNull( arguments.filter.isBillable ) && len( arguments.filter.isBillable ) ) {
+            b.isBillable = !!arguments.filter.isBillable;
+        }
+        return b;
+    }
+
+}

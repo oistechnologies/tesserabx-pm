@@ -1,0 +1,82 @@
+/**
+ * TimeReport: agent-facing report surface for pm_time_logs.
+ *
+ * Filters: project, user, date range, billable.
+ * Two grouped views (by user, by project) plus a raw list.
+ *
+ * Embedded on the /agent/pm/time-reports route via
+ * views/time/reports.bxm.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="timeService"    inject="TimeTrackingService@tesserabx-pm";
+    property name="projectService" inject="ProjectService@tesserabx-pm";
+
+    data = {
+        "projectId"      : "",
+        "userType"       : "",
+        "userId"         : "",
+        "fromDate"       : "",
+        "toDate"         : "",
+        "billableOnly"   : "",
+        "grouping"       : "user"
+    };
+
+    queryString = [ "projectId", "userType", "userId", "fromDate", "toDate", "billableOnly", "grouping" ];
+
+    function projects(){
+        return projectService.listProjects( includeArchived = true );
+    }
+
+    function filter(){
+        var f = {
+            projectId : data.projectId ?: "",
+            userType  : data.userType  ?: "",
+            userId    : data.userId    ?: "",
+            fromDate  : data.fromDate  ?: "",
+            toDate    : data.toDate    ?: ""
+        };
+        // Only constrain by billable when the operator picked one
+        // way. Empty string = "either".
+        if ( ( data.billableOnly ?: "" ) == "yes" ) f.isBillable = true;
+        if ( ( data.billableOnly ?: "" ) == "no"  ) f.isBillable = false;
+        return f;
+    }
+
+    function rows(){
+        switch ( data.grouping ?: "user" ) {
+            case "project": return timeService.totalsByProject( filter() );
+            case "list":    return timeService.listLogs(        filter() );
+            default:        return timeService.totalsByUser(    filter() );
+        }
+    }
+
+    function grandTotal(){
+        // Sum rows for the grouped views; for "list" mode we sum
+        // hours on the entity rows directly.
+        var total    = 0;
+        var billable = 0;
+        var rs = rows();
+        var mode = data.grouping ?: "user";
+        for ( var r in rs ) {
+            if ( mode == "list" ) {
+                total    += r.getHours() ?: 0;
+                if ( !!r.getIsBillable() ) billable += r.getHours() ?: 0;
+            } else {
+                total    += r.totalHours    ?: 0;
+                billable += r.billableHours ?: 0;
+            }
+        }
+        return { totalHours : total, billableHours : billable };
+    }
+
+    function clear(){
+        data.projectId    = "";
+        data.userType     = "";
+        data.userId       = "";
+        data.fromDate     = "";
+        data.toDate       = "";
+        data.billableOnly = "";
+    }
+
+}

@@ -1,0 +1,209 @@
+/**
+ * TimeTrackingServiceSpec: covers the create-path gate, rollups
+ * (subtask → task, task + subtask → project), and the by-user /
+ * by-project grouped queries.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "TimeTrackingService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.subtaskSvc = variables.wb.getInstance( "SubtaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "TimeTrackingService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                sleep( 200 );
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "refuses to create a log when the project has time tracking disabled", function(){
+                var ctx = setupProject( fixtureOrgIds, false );
+                expect( function(){
+                    variables.svc.createTimeLog( {
+                        organizationId : ctx.orgId,
+                        loggableType   : "task",
+                        loggableId     : ctx.task.getId(),
+                        userType       : "agent",
+                        userId         : createUUID(),
+                        hours          : 1.5
+                    } );
+                } ).toThrow( type = "TimeTrackingService.TrackingDisabled" );
+            } );
+
+            it( "writes a log when time tracking is enabled", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var log = variables.svc.createTimeLog( {
+                    organizationId : ctx.orgId,
+                    loggableType   : "task",
+                    loggableId     : ctx.task.getId(),
+                    userType       : "agent",
+                    userId         : createUUID(),
+                    hours          : 2.25,
+                    description    : "design review",
+                    isBillable     : true
+                } );
+                expect( len( log.getId() ) ).toBeGT( 0 );
+
+                var logs = variables.svc.listForLoggable( "task", ctx.task.getId() );
+                expect( arrayLen( logs ) ).toBe( 1 );
+                expect( logs[ 1 ].getHours() ).toBe( 2.25 );
+                expect( !!logs[ 1 ].getIsBillable() ).toBeTrue();
+            } );
+
+            it( "rejects hours <= 0 and non-numeric hours", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                expect( function(){
+                    variables.svc.createTimeLog( {
+                        organizationId : ctx.orgId,
+                        loggableType   : "task",
+                        loggableId     : ctx.task.getId(),
+                        userType       : "agent",
+                        userId         : createUUID(),
+                        hours          : 0
+                    } );
+                } ).toThrow( type = "TimeTrackingService.InvalidHours" );
+
+                expect( function(){
+                    variables.svc.createTimeLog( {
+                        organizationId : ctx.orgId,
+                        loggableType   : "task",
+                        loggableId     : ctx.task.getId(),
+                        userType       : "agent",
+                        userId         : createUUID(),
+                        hours          : "not a number"
+                    } );
+                } ).toThrow( type = "TimeTrackingService.MissingField" );
+            } );
+
+            it( "totalsForLoggable sums hours and billable separately", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var uid = createUUID();
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 1.0, isBillable : true  } );
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 0.5, isBillable : false } );
+                var t = variables.svc.totalsForLoggable( "task", ctx.task.getId() );
+                expect( t.totalHours    ).toBe( 1.5 );
+                expect( t.billableHours ).toBe( 1.0 );
+            } );
+
+            it( "totalsForTask rolls subtask hours up into the parent", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var sub = variables.subtaskSvc.createSubtask( {
+                    taskId         : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "subtask-roll"
+                } );
+                var uid = createUUID();
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task",    loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 1.0 } );
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "subtask", loggableId : sub.getId(),      userType : "agent", userId : uid, hours : 2.5 } );
+
+                var direct = variables.svc.totalsForLoggable( "task", ctx.task.getId() );
+                expect( direct.totalHours ).toBe( 1.0 );
+
+                var rolled = variables.svc.totalsForTask( ctx.task.getId() );
+                expect( rolled.totalHours ).toBe( 3.5 );
+            } );
+
+            it( "totalsForProject rolls task + subtask hours up to the project", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var sub = variables.subtaskSvc.createSubtask( {
+                    taskId         : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "subtask-proj"
+                } );
+                var uid = createUUID();
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task",    loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 1.0, isBillable : true  } );
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "subtask", loggableId : sub.getId(),      userType : "agent", userId : uid, hours : 3.0, isBillable : false } );
+
+                var p = variables.svc.totalsForProject( ctx.project.getId() );
+                expect( p.totalHours    ).toBe( 4.0 );
+                expect( p.billableHours ).toBe( 1.0 );
+            } );
+
+            it( "totalsByUser groups across loggables", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var u1 = createUUID();
+                var u2 = createUUID();
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : u1, hours : 2.0 } );
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : u2, hours : 1.0 } );
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : u1, hours : 0.5 } );
+
+                var rows = variables.svc.totalsByUser( { organizationId : ctx.orgId } );
+                var hours = {};
+                for ( var r in rows ) hours[ r.key ] = r.totalHours;
+                expect( hours[ u1 ] ?: 0 ).toBe( 2.5 );
+                expect( hours[ u2 ] ?: 0 ).toBe( 1.0 );
+            } );
+
+            it( "billable filter narrows listLogs", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var uid = createUUID();
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 1.0, isBillable : true  } );
+                variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 2.0, isBillable : false } );
+
+                var billable    = variables.svc.listLogs( { organizationId : ctx.orgId, isBillable : true  } );
+                var nonBillable = variables.svc.listLogs( { organizationId : ctx.orgId, isBillable : false } );
+                expect( arrayLen( billable    ) ).toBe( 1 );
+                expect( arrayLen( nonBillable ) ).toBe( 1 );
+                expect( billable[    1 ].getHours() ).toBe( 1.0 );
+                expect( nonBillable[ 1 ].getHours() ).toBe( 2.0 );
+            } );
+
+            it( "soft-delete removes from rollups", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                var uid = createUUID();
+                var log = variables.svc.createTimeLog( { organizationId : ctx.orgId, loggableType : "task", loggableId : ctx.task.getId(), userType : "agent", userId : uid, hours : 2.0 } );
+                expect( variables.svc.totalsForLoggable( "task", ctx.task.getId() ).totalHours ).toBe( 2.0 );
+                variables.svc.removeTimeLog( log.getId() );
+                expect( variables.svc.totalsForLoggable( "task", ctx.task.getId() ).totalHours ).toBe( 0 );
+            } );
+
+            it( "rejects an unknown loggable_type", function(){
+                var ctx = setupProject( fixtureOrgIds, true );
+                expect( function(){
+                    variables.svc.createTimeLog( {
+                        organizationId : ctx.orgId,
+                        loggableType   : "milestone",
+                        loggableId     : createUUID(),
+                        userType       : "agent",
+                        userId         : createUUID(),
+                        hours          : 1
+                    } );
+                } ).toThrow( type = "TimeTrackingService.InvalidLoggable" );
+            } );
+
+        } );
+    }
+
+    private struct function setupProject(
+        required array fixtureOrgIds,
+        required boolean trackingEnabled
+    ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "tt-" & createUUID(), slug : "tt-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( {
+            organizationId      : orgId,
+            name                : "tt-" & createUUID(),
+            timeTrackingEnabled : arguments.trackingEnabled
+        } );
+        var task = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "tt-task" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}
