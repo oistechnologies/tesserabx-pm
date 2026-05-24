@@ -1,0 +1,35 @@
+# Compose override template for local PM development.
+#
+# Copy this file into the TesseraBX HOST repo root as
+# `compose.override.yaml` and update the source path on the left of
+# each `:` to match where you cloned tesserabx-pm. Docker Compose
+# layers this file on top of compose.yaml + compose.dev.yaml when
+# present, mounting your local PM checkout at
+# /app/modules/tesserabx-pm/ inside the host's app, worker, and
+# scheduler containers.
+#
+# The host's `.gitignore` does not currently exclude
+# `compose.override.yaml`. Either:
+#   (a) add a single line to the host's .gitignore (PR proposed as a
+#       Phase 0 deliverable), or
+#   (b) until that PR merges, add the filename to the host repo's
+#       `.git/info/exclude` so your local override is not tracked.
+#
+# Bring the stack up from the host repo root:
+#
+#   docker compose \
+#     -f compose.yaml \
+#     -f compose.dev.yaml \
+#     -f compose.override.yaml \
+#     up
+
+services:
+  app:
+    volumes:
+      - /Users/mrigsby/Data/BoxLang-Dev/TesseraBX/GIT/tesserabx-pm:/app/modules/tesserabx-pm
+  worker:
+    volumes:
+      - /Users/mrigsby/Data/BoxLang-Dev/TesseraBX/GIT/tesserabx-pm:/app/modules/tesserabx-pm
+  scheduler:
+    volumes:
+      - /Users/mrigsby/Data/BoxLang-Dev/TesseraBX/GIT/tesserabx-pm:/app/modules/tesserabx-pm

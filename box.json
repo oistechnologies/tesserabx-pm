@@ -1,0 +1,53 @@
+{
+    "name":"tesserabx-pm",
+    "slug":"tesserabx-pm",
+    "version":"0.0.1",
+    "author":"OIS Technologies",
+    "location":"https://github.com/oistechnologies/tesserabx-pm",
+    "homepage":"https://github.com/oistechnologies/tesserabx-pm",
+    "documentation":"https://github.com/oistechnologies/tesserabx-pm",
+    "repository":{
+        "type":"git",
+        "url":"https://github.com/oistechnologies/tesserabx-pm"
+    },
+    "shortDescription":"Project Management add-on for the TesseraBX helpdesk platform.",
+    "description":"A third-party TesseraBX add-on. Adds projects, tasks, subtasks, customizable kanban boards, time tracking, templates, per-project custom fields, bidirectional ticket integration, mentions, watchers, a client-portal surface, and pgvector-backed AI augmentation through the host's AI middleware. Installs at modules/tesserabx-pm/ and participates in the host's settings.tesserabx manifest contract.",
+    "type":"modules",
+    "license":[
+        {
+            "type":"Apache-2.0",
+            "url":"https://www.apache.org/licenses/LICENSE-2.0"
+        }
+    ],
+    "engines":[
+        {
+            "type":"boxlang",
+            "version":">=1.0.0"
+        }
+    ],
+    "dependencies":{
+        "coldbox":"^8.1.0",
+        "cbsecurity":"^3.7.0",
+        "cbauth":"^7.0.0",
+        "cbvalidation":"^4.8.0",
+        "cbmailservices":"^2.9.0",
+        "cbmessagebox":"^4.1.0",
+        "cbstorages":"^3.5.0",
+        "cbpaginator":"^2.8.3",
+        "cbi18n":"^3.5.0",
+        "cbcsrf":"^3.2.0",
+        "cbantisamy":"^2.2.0",
+        "cbq":"^5.0.7",
+        "cbfs":"^1.1.4",
+        "cbwire":"^5.0.4",
+        "cfmigrations":"^5.1.1",
+        "mementifier":"^3.7.0",
+        "qb":"^13.1.0",
+        "quick":"^12.0.12",
+        "hyper":"^8.2.2"
+    },
+    "devDependencies":{
+        "testbox":"^7.0.0"
+    },
+    "_buildNote":"PM does not run its own server. Dependency pins mirror the TesseraBX host's box.json so contributors who run `box install` against this repo for standalone introspection resolve compatible artifacts; at runtime PM uses whatever the host has installed."
+}

@@ -2,3 +2,67 @@
 .env
 .env.local
 .env.*.local
+
+# CommandBox
+.engine/
+.cfconfig/
+.cfconfigignore
+.tmp/
+
+# Module installs (resolved from box.json). PM does not run its own
+# server, but `box install` against PM's box.json will populate these
+# locally when a contributor wants to introspect dependency sources.
+modules/coldbox/
+modules/cbq/
+modules/cbfs/
+modules/cbauth/
+modules/cbsecurity/
+modules/cbswagger/
+modules/cbvalidation/
+modules/cbmailservices/
+modules/cbmessagebox/
+modules/cbstorages/
+modules/cbjwt/
+modules/cbwire/
+modules/cfmigrations/
+modules/mementifier/
+modules/qb/
+modules/quick/
+modules/cbdebugger/
+modules/testbox/
+modules/mockbox/
+modules/cbi18n/
+modules/cbpaginator/
+modules/cors/
+modules/hyper/
+modules/cbantisamy/
+modules/cbcsrf/
+modules/bcrypt/
+modules/s3sdk/
+
+# Local Claude Code agent state
+.claude/
+
+# Build artifacts
+build/
+dist/
+
+# Logs
+logs/
+*.log
+
+# Test runner output. Track the directory (via .gitkeep) so CI's
+# outputFile= argument has a target path on a fresh checkout, but
+# ignore everything written into it.
+tests/results/*
+!tests/results/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.fleet/
+.history/
+
+# OS
+Thumbs.db
