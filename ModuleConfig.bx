@@ -25,14 +25,20 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    // PM's external URL surface (/agent/pm, /pm, /agent/admin/pm) is
-    // declared in settings.tesserabx.routeClaims and registered by
-    // the host's AddonRouteClaimsRegistrar at boot. The entryPoint
-    // is kept as the add-on slug so PM has a well-known module
-    // identifier in ColdBox; the URL space `/tesserabx-pm/*` is
-    // available for any internal admin pages PM wants but is not
-    // the canonical landing for any user-facing surface.
-    this.entryPoint         = "tesserabx-pm";
+    // PM owns the `/agent/pm` URL space directly through its module
+    // entryPoint (multi-segment, the same pattern the host's admin
+    // module uses with entryPoint="agent/admin"). All PM agent-side
+    // routes (Projects, Tasks, Subtasks, ProjectStatuses, etc.)
+    // declared in config/Router.bx auto-prefix with /agent/pm; the
+    // agent firewall regex `^agent($|/)` covers them automatically.
+    //
+    // The two cross-surface URLs (`/pm` on the portal and
+    // `/agent/admin/pm` on the admin surface) are not reachable from
+    // PM's own router because they live outside the entryPoint URL
+    // space. They are bound through settings.tesserabx.routeClaims
+    // and registered by the host's AddonRouteClaimsRegistrar on
+    // afterAspectsLoad.
+    this.entryPoint         = "agent/pm";
     this.modelNamespace     = "tesserabx-pm";
     this.cfmapping          = "tesserabx.modules.tesserabx-pm";
     this.autoMapModels      = false;
@@ -114,17 +120,18 @@ class {
                         permissions : [ "pm.view", "pm.edit" ]
                     }
                 ],
-                // Top-level URL claims. The host's RouteClaimsRegistry
-                // walks every manifest for `routeClaims` and the
-                // AddonRouteClaimsRegistrar interceptor injects each
-                // into ColdBox's main router on `afterAspectsLoad`
-                // (prepended so the claim matches before the host's
-                // catch-all). Each entry composes a ColdBox event
-                // string of the form `<module>:<Handler>.<action>`.
+                // Top-level URL claims for surfaces PM cannot reach
+                // from its own module Router. `/agent/pm` is owned
+                // by PM's entryPoint and is handled directly by
+                // config/Router.bx; only the cross-surface URLs are
+                // declared here. The host's
+                // AddonRouteClaimsRegistrar interceptor walks every
+                // manifest's `routeClaims` and prepends each into
+                // ColdBox's main router on `afterAspectsLoad`, so
+                // claims match before the host's catch-all.
                 routeClaims : [
-                    { path : "/agent/pm",       verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index"  },
-                    { path : "/agent/admin/pm", verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index"  },
-                    { path : "/pm",             verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index"  }
+                    { path : "/pm",             verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index" },
+                    { path : "/agent/admin/pm", verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index" }
                 ],
                 navigation : [
                     {
@@ -209,13 +216,25 @@ class {
     }
 
     function onLoad(){
+        // Services (singleton).
+        binder.map( "VisibilityService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.VisibilityService" )
+              .asSingleton();
+        binder.map( "ProjectService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.ProjectService" )
+              .asSingleton();
+
+        // DTOs (singleton).
+        binder.map( "ProjectDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.ProjectDto" )
+              .asSingleton();
+
         // Quick entity mappings. autoMapModels is false, so every
         // entity Quick may resolve through a relationship target
         // string like "Project@tesserabx-pm" must be bound here.
         // Mirrors the modules_app/tickets/ModuleConfig.bx pattern:
         // entities are not singletons (each call returns a new
-        // instance); services and DTOs added in later phases will
-        // use .asSingleton().
+        // instance).
         binder.map( "ProjectTemplate@tesserabx-pm"  ).to( "#moduleMapping#.models.entities.ProjectTemplate"  );
         binder.map( "Project@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Project"          );
         binder.map( "ProjectStatus@tesserabx-pm"    ).to( "#moduleMapping#.models.entities.ProjectStatus"    );

@@ -1,0 +1,92 @@
+<bx:output>
+<bx:set local.p = prc.project >
+
+<div class="container-fluid">
+	<nav aria-label="breadcrumb" class="mb-2">
+		<ol class="breadcrumb mb-0 small">
+			<li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+			<li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.p.getId() )#" class="link-secondary">#encodeForHTML( local.p.getName() )#</a></li>
+			<li class="breadcrumb-item active" aria-current="page">Edit</li>
+		</ol>
+	</nav>
+
+	<h1 class="mb-3 fs-3">Edit project</h1>
+
+	<bx:if arrayLen( prc.formErrors ?: [] )>
+		<div class="alert alert-danger">
+			<ul class="mb-0">
+				<bx:loop array="#prc.formErrors#" item="err">
+					<li>#encodeForHTML( err.message )#</li>
+				</bx:loop>
+			</ul>
+		</div>
+	</bx:if>
+
+	<form method="post" action="/agent/pm/projects/#encodeForURL( local.p.getId() )#" class="card">
+		<div class="card-body">
+			<div class="row g-3">
+				<div class="col-12 col-md-8">
+					<label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+					<input type="text" class="form-control" id="name" name="name" required maxlength="255"
+						value="#encodeForHTMLAttribute( prc.formData.name ?: "" )#">
+				</div>
+				<div class="col-12 col-md-4">
+					<label class="form-label" for="organizationId">Organization</label>
+					<input type="text" class="form-control" id="organizationId" name="organizationId" readonly disabled
+						value="#encodeForHTMLAttribute( prc.formData.organizationId ?: "" )#">
+					<small class="form-text text-body-secondary">Tenant cannot be changed after creation.</small>
+				</div>
+
+				<div class="col-12">
+					<label class="form-label" for="description">Description</label>
+					<textarea class="form-control" id="description" name="description" rows="4">#encodeForHTML( prc.formData.description ?: "" )#</textarea>
+				</div>
+
+				<div class="col-12 col-md-4">
+					<label class="form-label" for="visibilityScope">Visibility</label>
+					<select class="form-select" id="visibilityScope" name="visibilityScope">
+						<option value="all_org_members"
+							<bx:if ( prc.formData.visibilityScope ?: "all_org_members" ) eq "all_org_members"> selected</bx:if>>
+							All organization members
+						</option>
+						<option value="specific_members"
+							<bx:if ( prc.formData.visibilityScope ?: "" ) eq "specific_members"> selected</bx:if>>
+							Specific members
+						</option>
+					</select>
+				</div>
+				<div class="col-12 col-md-4">
+					<label class="form-label" for="lifecycleStatus">Lifecycle status</label>
+					<select class="form-select" id="lifecycleStatus" name="lifecycleStatus">
+						<bx:loop array="#[ "active", "archived", "completed" ]#" item="s">
+							<option value="#s#" <bx:if ( prc.formData.lifecycleStatus ?: "active" ) eq s> selected</bx:if>>#s#</option>
+						</bx:loop>
+					</select>
+				</div>
+				<div class="col-6 col-md-2">
+					<label class="form-label" for="startDate">Start</label>
+					<input type="date" class="form-control" id="startDate" name="startDate"
+						value="#encodeForHTMLAttribute( prc.formData.startDate ?: "" )#">
+				</div>
+				<div class="col-6 col-md-2">
+					<label class="form-label" for="endDate">End</label>
+					<input type="date" class="form-control" id="endDate" name="endDate"
+						value="#encodeForHTMLAttribute( prc.formData.endDate ?: "" )#">
+				</div>
+
+				<div class="col-12">
+					<div class="form-check">
+						<input class="form-check-input" type="checkbox" id="timeTrackingEnabled" name="timeTrackingEnabled" value="true"
+							<bx:if prc.formData.timeTrackingEnabled ?: false> checked</bx:if>>
+						<label class="form-check-label" for="timeTrackingEnabled">Enable time tracking</label>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="card-footer d-flex justify-content-end gap-2">
+			<a class="btn btn-outline-secondary" href="/agent/pm/projects/#encodeForURL( local.p.getId() )#">Cancel</a>
+			<button class="btn btn-primary" type="submit"><i class="bi bi-check-lg"></i> Save changes</button>
+		</div>
+	</form>
+</div>
+</bx:output>

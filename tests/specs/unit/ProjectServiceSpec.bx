@@ -1,0 +1,175 @@
+/**
+ * ProjectServiceSpec: round-trip CRUD coverage for the Phase 2a
+ * Project surface.
+ *
+ * Each `it()` block creates a real organization fixture, exercises
+ * the service against the live DB, and cleans up in an afterEach.
+ * Verified columns mirror BUILD-PLAN §7.1 plus the §3.13 soft-
+ * delete rules.
+ *
+ * The fixture organization is named with a unique "pm-spec-" prefix
+ * so a separately-orphaned cleanup sweep can be added later if
+ * spec teardowns leak.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb     = getController().getWireBox();
+        variables.svc    = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "ProjectService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                // Cascade cleanup: pm_projects FK org_id has ON
+                // DELETE CASCADE, so deleting the org drops the
+                // projects too.
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute(
+                        "DELETE FROM organizations WHERE id = :id",
+                        { id : orgId }
+                    );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createProject writes a row with sensible defaults", function(){
+                var orgId = newOrg( fixtureOrgIds );
+                var project = variables.svc.createProject( {
+                    organizationId : orgId,
+                    name           : "Phase 2a Smoke Project",
+                    description    : "Created from ProjectServiceSpec",
+                    actorType      : "agent",
+                    actorId        : "00000000-0000-0000-0000-000000000099"
+                } );
+                expect( project ).notToBeNull();
+                expect( project.getId() ).notToBeEmpty();
+                expect( project.getOrganizationId() ).toBe( orgId );
+                expect( project.getName() ).toBe( "Phase 2a Smoke Project" );
+                expect( project.getVisibilityScope() ).toBe( "all_org_members" );
+                expect( project.getLifecycleStatus() ).toBe( "active" );
+                expect( !!project.getTimeTrackingEnabled() ).toBeFalse();
+                expect( !!project.getIsTemplate() ).toBeFalse();
+            } );
+
+            it( "createProject rejects a missing organizationId", function(){
+                expect( function(){
+                    variables.svc.createProject( { name : "no org" } );
+                } ).toThrow( type = "ProjectService.MissingField" );
+            } );
+
+            it( "createProject rejects an unknown visibilityScope", function(){
+                var orgId = newOrg( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createProject( {
+                        organizationId  : orgId,
+                        name            : "bad scope",
+                        visibilityScope : "everyone-everywhere"
+                    } );
+                } ).toThrow( type = "ProjectService.InvalidVisibilityScope" );
+            } );
+
+            it( "updateProject persists name and description changes", function(){
+                var orgId   = newOrg( fixtureOrgIds );
+                var project = variables.svc.createProject( {
+                    organizationId : orgId,
+                    name           : "Original",
+                    description    : "Before"
+                } );
+                variables.svc.updateProject( project.getId(), {
+                    name        : "Renamed",
+                    description : "After"
+                } );
+                var refreshed = variables.svc.getProject( project.getId() );
+                expect( refreshed.getName() ).toBe( "Renamed" );
+                expect( refreshed.getDescription() ).toBe( "After" );
+            } );
+
+            it( "archiveProject flips lifecycle_status to archived without soft-deleting", function(){
+                var orgId = newOrg( fixtureOrgIds );
+                var p     = variables.svc.createProject( { organizationId : orgId, name : "Will Archive" } );
+                variables.svc.archiveProject( p.getId() );
+                var refreshed = variables.svc.getProject( p.getId() );
+                expect( refreshed.getLifecycleStatus() ).toBe( "archived" );
+                expect( toString( refreshed.getDeletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "restoreProject sets lifecycle back to active and clears deleted_at", function(){
+                var orgId = newOrg( fixtureOrgIds );
+                var p     = variables.svc.createProject( { organizationId : orgId, name : "Will Restore" } );
+
+                // Archive then restore round-trip: lifecycle bounces.
+                variables.svc.archiveProject( p.getId() );
+                variables.svc.restoreProject( p.getId() );
+                var afterArchiveCycle = variables.svc.getProject( p.getId() );
+                expect( afterArchiveCycle.getLifecycleStatus() ).toBe( "active" );
+
+                // Soft-delete then restore round-trip: deleted_at clears.
+                variables.svc.removeProject( p.getId() );
+                expect( variables.svc.getProject( p.getId() ) ).toBeNull( "getProject filters soft-deleted rows." );
+                variables.svc.restoreProject( p.getId() );
+                var afterDeleteCycle = variables.svc.getProject( p.getId() );
+                expect( afterDeleteCycle ).notToBeNull();
+                expect( afterDeleteCycle.getLifecycleStatus() ).toBe( "active" );
+                expect( toString( afterDeleteCycle.getDeletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "removeProject soft-deletes the row (deleted_at is set, row not gone)", function(){
+                var orgId = newOrg( fixtureOrgIds );
+                var p     = variables.svc.createProject( { organizationId : orgId, name : "Will Soft Delete" } );
+                variables.svc.removeProject( p.getId() );
+
+                expect( variables.svc.getProject( p.getId() ) ).toBeNull( "getProject filters whereNull(deleted_at)." );
+
+                // Pull directly to confirm the row still exists with deleted_at set.
+                var raw = queryExecute(
+                    "SELECT id, deleted_at FROM pm_projects WHERE id = :id",
+                    { id : p.getId() }
+                );
+                expect( raw.recordCount ).toBe( 1 );
+                expect( raw.deleted_at[ 1 ] ).notToBeEmpty();
+            } );
+
+            it( "listProjects respects includeArchived and organizationId filters", function(){
+                var orgId = newOrg( fixtureOrgIds );
+                var keep  = variables.svc.createProject( { organizationId : orgId, name : "Keep Active" } );
+                var arch  = variables.svc.createProject( { organizationId : orgId, name : "Will Archive" } );
+                variables.svc.archiveProject( arch.getId() );
+
+                var defaultList = variables.svc.listProjects( organizationId = orgId );
+                var idsDefault  = defaultList.map( ( p ) => p.getId() );
+                expect( idsDefault ).toInclude( keep.getId() );
+                expect( idsDefault ).notToInclude( arch.getId() );
+
+                var withArchived = variables.svc.listProjects( organizationId = orgId, includeArchived = true );
+                var idsAll       = withArchived.map( ( p ) => p.getId() );
+                expect( idsAll ).toInclude( keep.getId() );
+                expect( idsAll ).toInclude( arch.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------- fixture helpers ----------
+
+    private string function newOrg( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            {
+                id   : orgId,
+                name : "pm-spec-" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                slug : "pm-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+            }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        return orgId;
+    }
+
+}

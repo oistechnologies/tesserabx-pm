@@ -1,0 +1,124 @@
+<bx:output>
+<div class="container-fluid">
+
+	<div class="d-flex justify-content-between align-items-center mb-3">
+		<div>
+			<h1 class="mb-0 fs-3">Projects</h1>
+			<p class="text-body-secondary mb-0 small">Project Management on TesseraBX</p>
+		</div>
+		<a class="btn btn-primary" href="/agent/pm/projects/new"><i class="bi bi-plus-lg"></i> New project</a>
+	</div>
+
+	<!--- Filter card --->
+	<form method="get" action="/agent/pm/projects" class="card mb-3">
+		<div class="card-body">
+			<div class="row g-3">
+				<div class="col-12 col-md-6">
+					<label class="form-label" for="q">Search</label>
+					<div class="input-group">
+						<span class="input-group-text"><i class="bi bi-search"></i></span>
+						<input type="search" class="form-control" id="q" name="q"
+							placeholder="Project name..."
+							value="#encodeForHTMLAttribute( prc.filters.q ?: "" )#">
+					</div>
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="organizationId">Organization</label>
+					<select class="form-select" id="organizationId" name="organizationId">
+						<option value="">All organizations</option>
+						<bx:loop array="#prc.organizations#" item="org">
+							<option value="#encodeForHTMLAttribute( org.getId() )#"
+								<bx:if ( prc.filters.organizationId ?: "" ) eq org.getId()> selected</bx:if>>
+								#encodeForHTML( org.getName() )#
+							</option>
+						</bx:loop>
+					</select>
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="lifecycleStatus">Status</label>
+					<select class="form-select" id="lifecycleStatus" name="lifecycleStatus">
+						<option value="">Any</option>
+						<bx:loop array="#[ "active", "archived", "completed" ]#" item="s">
+							<option value="#s#" <bx:if ( prc.filters.lifecycleStatus ?: "" ) eq s> selected</bx:if>>#s#</option>
+						</bx:loop>
+					</select>
+				</div>
+				<div class="col-12">
+					<div class="form-check form-check-inline">
+						<input class="form-check-input" type="checkbox" id="includeArchived" name="includeArchived" value="true"
+							<bx:if prc.filters.includeArchived ?: false> checked</bx:if>>
+						<label class="form-check-label" for="includeArchived">Include archived</label>
+					</div>
+				</div>
+			</div>
+			<div class="d-flex justify-content-end gap-2 mt-3">
+				<a class="btn btn-outline-secondary" href="/agent/pm/projects">Reset</a>
+				<button class="btn btn-primary" type="submit">Filter</button>
+			</div>
+		</div>
+	</form>
+
+	<!--- Project list --->
+	<div class="card">
+		<div class="card-body p-0">
+			<div class="table-responsive">
+				<table class="table table-striped table-hover mb-0 align-middle">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Organization</th>
+							<th>Visibility</th>
+							<th>Status</th>
+							<th>Start</th>
+							<th>End</th>
+							<th class="text-end">Created</th>
+						</tr>
+					</thead>
+					<tbody>
+						<bx:if !arrayLen( prc.projects ?: [] )>
+							<tr><td colspan="7" class="text-center text-body-secondary py-4">No projects match your filters.</td></tr>
+						</bx:if>
+						<bx:loop array="#prc.projects#" item="p">
+							<tr>
+								<td>
+									<a href="/agent/pm/projects/#encodeForURL( p.getId() )#" class="link-primary fw-semibold">
+										#encodeForHTML( p.getName() )#
+									</a>
+									<bx:if len( p.getDescription() ?: "" )>
+										<div class="text-body-secondary small">#encodeForHTML( left( p.getDescription(), 120 ) )##len( p.getDescription() ) gt 120 ? "..." : ""#</div>
+									</bx:if>
+								</td>
+								<td class="text-body-secondary small">
+									<bx:set local.orgId = p.getOrganizationId() ?: "" >
+									<bx:set local.org = "" >
+									<bx:loop array="#prc.organizations#" item="o">
+										<bx:if o.getId() eq local.orgId><bx:set local.org = o ></bx:if>
+									</bx:loop>
+									<bx:if !isSimpleValue( local.org )>
+										#encodeForHTML( local.org.getName() )#
+									<bx:else>
+										<span class="text-warning">unknown</span>
+									</bx:if>
+								</td>
+								<td><span class="badge text-bg-secondary">#encodeForHTML( p.getVisibilityScope() )#</span></td>
+								<td>
+									<bx:if p.getLifecycleStatus() eq "active">
+										<span class="badge text-bg-success">active</span>
+									<bx:elseif p.getLifecycleStatus() eq "archived">
+										<span class="badge text-bg-secondary">archived</span>
+									<bx:else>
+										<span class="badge text-bg-info">#encodeForHTML( p.getLifecycleStatus() )#</span>
+									</bx:if>
+								</td>
+								<td class="text-body-secondary small">#toString( p.getStartDate() ?: "" )#</td>
+								<td class="text-body-secondary small">#toString( p.getEndDate() ?: "" )#</td>
+								<td class="text-end text-body-secondary small">#toString( p.getCreatedAt() ?: "" )#</td>
+							</tr>
+						</bx:loop>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+</div>
+</bx:output>

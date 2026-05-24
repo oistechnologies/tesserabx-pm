@@ -1,0 +1,168 @@
+/**
+ * VisibilityService: enforces BUILD-PLAN §3.3 Option C visibility
+ * on top of the host's tenant scope.
+ *
+ * Two layers of access control sit between a viewer and PM data:
+ *
+ *   1. Tenant scope (host). Quick's TenantScope@contacts adds a
+ *      `WHERE organization_id = :ctx` predicate whenever the current
+ *      viewer carries a tenant context. Agents carry no tenant
+ *      context, so the scope is a no-op for them (they see across
+ *      orgs subject to RBAC). Contacts carry their organization_id,
+ *      so the scope filters automatically.
+ *
+ *   2. Option C visibility (PM, this service). On top of the org
+ *      cut, PM further restricts what a CONTACT viewer can see:
+ *
+ *      Projects:
+ *        - When the project's visibility_scope is `all_org_members`,
+ *          every contact in the org sees it.
+ *        - When the visibility_scope is `specific_members`, only
+ *          contacts listed in pm_project_members for that project
+ *          see it.
+ *
+ *      Tasks (Phase 2b+):
+ *        - Task is assigned to the viewer, OR
+ *        - Task is assigned to another contact in the viewer's org,
+ *          OR
+ *        - Task has is_client_visible = true.
+ *
+ *      Agents see every project + task within every project they
+ *      have access to, subject to RBAC. No Option C filtering for
+ *      agents at the service layer.
+ *
+ * Callers pass a viewer struct rather than relying on global auth
+ * state so the service is unit-testable without a live cbauth
+ * session:
+ *
+ *      {
+ *          accountType    : "agent" | "contact",
+ *          accountId      : "<uuid>",
+ *          organizationId : "<uuid>"  // for contacts only
+ *      }
+ *
+ * Use ViewerHelpers (Phase 2b) for handlers to build the struct
+ * from prc.oCurrentUser; for now handlers construct it inline.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    /**
+     * Build the Quick query for projects the viewer is allowed to
+     * see. Returns an unloaded QuickBuilder so the caller can add
+     * further filters (search, status, sort) before .get().
+     *
+     * Agents bypass the tenant scope (they query across orgs).
+     * Contacts inherit it (org cut automatic) and then get Option C
+     * pinned on top by this method.
+     */
+    public any function projectsQueryForViewer( required struct viewer ){
+        validateViewer( arguments.viewer );
+        var entity = wirebox.getInstance( "Project@tesserabx-pm" );
+
+        if ( arguments.viewer.accountType == "agent" ) {
+            return entity.withoutGlobalScope();
+        }
+
+        // Contact path. The tenant scope already applies an org
+        // cut; layer the project-visibility predicate on top.
+        var contactId      = arguments.viewer.accountId;
+        var organizationId = arguments.viewer.organizationId;
+
+        // `all_org_members` projects are visible to every contact
+        // in the org; `specific_members` projects are visible only
+        // when the viewer has a pm_project_members row.
+        //
+        // qb does not expose an OR-EXISTS chain directly through
+        // Quick's relationship API for unloaded queries, so we
+        // build the WHERE clause manually:
+        //   visibility_scope = 'all_org_members'
+        //   OR id IN ( SELECT project_id FROM pm_project_members
+        //              WHERE organization_id = :org
+        //              AND   member_type = 'contact'
+        //              AND   member_id   = :contactId )
+        return entity.where( function( q ){
+            q.where( "visibility_scope", "all_org_members" )
+             .orWhereIn( "id", function( sub ){
+                sub.from( "pm_project_members" )
+                   .select( "project_id" )
+                   .where( "organization_id", organizationId )
+                   .where( "member_type",     "contact" )
+                   .where( "member_id",       contactId );
+             } );
+        } );
+    }
+
+    /**
+     * Return true when the viewer is allowed to see the project.
+     * Used by `show` handlers as an explicit guard after fetch.
+     */
+    public boolean function canViewProject( required struct viewer, required any project ){
+        validateViewer( arguments.viewer );
+        if ( isNull( arguments.project ) ) return false;
+
+        if ( arguments.viewer.accountType == "agent" ) return true;
+
+        // Contact path. The tenant scope guarantees the project is
+        // in the contact's org by the time we get here; just check
+        // visibility_scope membership.
+        if ( arguments.project.getVisibilityScope() == "all_org_members" ) return true;
+
+        var hits = queryExecute(
+            "SELECT 1 FROM pm_project_members
+             WHERE  project_id = :pid
+             AND    organization_id = :org
+             AND    member_type = 'contact'
+             AND    member_id   = :cid
+             LIMIT  1",
+            {
+                pid : arguments.project.getId(),
+                org : arguments.viewer.organizationId,
+                cid : arguments.viewer.accountId
+            }
+        );
+        return hits.recordCount > 0;
+    }
+
+    /**
+     * Guard that throws when the viewer is not allowed to see the
+     * project. Service-layer callers use this so handlers do not
+     * have to repeat the if/throw boilerplate.
+     */
+    public void function assertCanViewProject( required struct viewer, required any project ){
+        if ( !canViewProject( arguments.viewer, arguments.project ) ) {
+            throw(
+                type    = "VisibilityService.ProjectNotVisible",
+                message = "Viewer is not authorized to see this project."
+            );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private void function validateViewer( required struct viewer ){
+        if ( !structKeyExists( arguments.viewer, "accountType" )
+          || !structKeyExists( arguments.viewer, "accountId" ) ) {
+            throw(
+                type    = "VisibilityService.InvalidViewer",
+                message = "Viewer struct must carry accountType and accountId."
+            );
+        }
+        if ( arguments.viewer.accountType != "agent"
+          && arguments.viewer.accountType != "contact" ) {
+            throw(
+                type    = "VisibilityService.InvalidViewer",
+                message = "Viewer accountType must be 'agent' or 'contact'; got [#arguments.viewer.accountType#]."
+            );
+        }
+        if ( arguments.viewer.accountType == "contact"
+          && !len( arguments.viewer.organizationId ?: "" ) ) {
+            throw(
+                type    = "VisibilityService.InvalidViewer",
+                message = "Contact viewers must carry an organizationId."
+            );
+        }
+    }
+
+}

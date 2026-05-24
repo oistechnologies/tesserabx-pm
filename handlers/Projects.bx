@@ -1,0 +1,299 @@
+/**
+ * Agent-surface Projects handler.
+ *
+ * Routes (auto-prefixed with /agent/pm by ModuleConfig.bx
+ * entryPoint, declared in config/Router.bx):
+ *
+ *   GET  /                            -> index
+ *   GET  /projects                    -> index
+ *   GET  /projects/new                -> new (form)
+ *   POST /projects/new                -> create
+ *   GET  /projects/:id                -> show
+ *   POST /projects/:id                -> update
+ *   GET  /projects/:id/edit           -> edit (form)
+ *   POST /projects/:id/archive        -> archive
+ *   POST /projects/:id/restore        -> restore
+ *   POST /projects/:id/delete         -> remove (soft delete)
+ *
+ * Permissions are enforced through fine-grained checks at the start
+ * of each action (the /agent firewall has already established that
+ * the request is from an agent). The mappings are:
+ *
+ *   pm.view          -> index, show
+ *   pm.create        -> new, create
+ *   pm.edit          -> edit, update, archive, restore
+ *   pm.delete        -> remove
+ *
+ * Errors that the service raises (e.g. invalidVisibilityScope) are
+ * caught and surfaced through messagebox; the request relocates
+ * back to the form so the user can correct and resubmit.
+ */
+class {
+
+    property name="projectService"  inject="ProjectService@tesserabx-pm";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        // Every agent-surface PM page renders inside the host's
+        // Agent layout. Setting it here once keeps the actions
+        // below focused on the data.
+        event.setLayout( name = "Agent", module = "core" );
+
+        // Surface viewer context to views and helper code.
+        prc.viewer = currentViewer();
+    }
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    function index( event, rc, prc ){
+        requirePermission( prc, "pm.view" );
+
+        param rc.q               = "";
+        param rc.organizationId  = "";
+        param rc.lifecycleStatus = "";
+        param rc.includeArchived = false;
+
+        prc.pageTitle      = "Projects";
+        prc.filters        = {
+            q                : rc.q,
+            organizationId   : rc.organizationId,
+            lifecycleStatus  : rc.lifecycleStatus,
+            includeArchived  : truthy( rc.includeArchived )
+        };
+        prc.organizations = contactsService.listOrganizations();
+        prc.projects = projectService.listProjects(
+            organizationId   = rc.organizationId,
+            lifecycleStatus  = rc.lifecycleStatus,
+            search           = rc.q,
+            includeArchived  = truthy( rc.includeArchived ),
+            limit            = 200
+        );
+        event.setView( view = "projects/index", module = "tesserabx-pm" );
+    }
+
+    function show( event, rc, prc ){
+        requirePermission( prc, "pm.view" );
+
+        var project = projectService.getProject( rc.id ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        prc.pageTitle = project.getName();
+        prc.project   = project;
+        event.setView( view = "projects/show", module = "tesserabx-pm" );
+    }
+
+    // ---------------------------------------------------------------
+    // Writes
+    // ---------------------------------------------------------------
+
+    function new( event, rc, prc ){
+        requirePermission( prc, "pm.create" );
+
+        prc.pageTitle    = "New project";
+        prc.organizations = contactsService.listOrganizations();
+        prc.formData     = formDataDefaults( rc );
+        prc.formErrors   = prc.formErrors ?: [];
+        event.setView( view = "projects/new", module = "tesserabx-pm" );
+    }
+
+    function create( event, rc, prc ){
+        requirePermission( prc, "pm.create" );
+
+        var data = collectFormData( rc );
+        try {
+            var project = projectService.createProject(
+                data.append( actorContext( prc ) )
+            );
+            messagebox.info( "Project created." );
+            relocate( uri = "/agent/pm/projects/" & project.getId() );
+            return;
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            prc.formData   = data;
+            prc.formErrors = [ { field : "", message : e.message } ];
+            return new( event, rc, prc );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        requirePermission( prc, "pm.edit" );
+
+        var project = projectService.getProject( rc.id ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        prc.pageTitle    = "Edit project";
+        prc.project      = project;
+        prc.organizations = contactsService.listOrganizations();
+        prc.formData     = projectToFormData( project );
+        prc.formErrors   = prc.formErrors ?: [];
+        event.setView( view = "projects/edit", module = "tesserabx-pm" );
+    }
+
+    function update( event, rc, prc ){
+        requirePermission( prc, "pm.edit" );
+
+        var project = projectService.getProject( rc.id ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var data = collectFormData( rc );
+        try {
+            projectService.updateProject(
+                id   = project.getId(),
+                data = data.append( actorContext( prc ) )
+            );
+            messagebox.info( "Project updated." );
+            relocate( uri = "/agent/pm/projects/" & project.getId() );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            prc.project    = project;
+            prc.formData   = data;
+            prc.formErrors = [ { field : "", message : e.message } ];
+            prc.organizations = contactsService.listOrganizations();
+            event.setView( view = "projects/edit", module = "tesserabx-pm" );
+        }
+    }
+
+    function archive( event, rc, prc ){
+        requirePermission( prc, "pm.edit" );
+
+        try {
+            projectService.archiveProject(
+                id   = rc.id ?: "",
+                data = actorContext( prc )
+            );
+            messagebox.info( "Project archived." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/pm/projects/" & ( rc.id ?: "" ) );
+    }
+
+    function restore( event, rc, prc ){
+        requirePermission( prc, "pm.edit" );
+
+        try {
+            projectService.restoreProject(
+                id   = rc.id ?: "",
+                data = actorContext( prc )
+            );
+            messagebox.info( "Project restored." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/pm/projects/" & ( rc.id ?: "" ) );
+    }
+
+    function remove( event, rc, prc ){
+        requirePermission( prc, "pm.delete" );
+
+        try {
+            projectService.removeProject(
+                id   = rc.id ?: "",
+                data = actorContext( prc )
+            );
+            messagebox.info( "Project deleted." );
+            relocate( uri = "/agent/pm/projects" );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            relocate( uri = "/agent/pm/projects/" & ( rc.id ?: "" ) );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private struct function currentViewer(){
+        try {
+            var u = auth.getUser();
+            return {
+                accountType    : "agent",
+                accountId      : u.getId(),
+                organizationId : ""
+            };
+        } catch ( any e ) {
+            return { accountType : "agent", accountId : "", organizationId : "" };
+        }
+    }
+
+    private struct function actorContext( required struct prc ){
+        var v = arguments.prc.viewer ?: { accountType : "agent", accountId : "" };
+        return { actorType : v.accountType, actorId : v.accountId };
+    }
+
+    private void function requirePermission( required struct prc, required string permission ){
+        var viewer = arguments.prc.viewer ?: {};
+        if ( !len( viewer.accountId ?: "" ) ) {
+            // The agent firewall should have already redirected an
+            // unauthenticated request, but guard belt-and-braces.
+            throw( type = "tesserabx-pm.Unauthorized", message = "Authentication required." );
+        }
+        // Permission resolution lives in the host's RoleRegistry; a
+        // signed-in agent with the right role gets the permission
+        // through cbSecurity. Phase 2a relies on cbSecurity's URL
+        // firewall (declared in config/cbSecurity.bx) for the
+        // coarse gating; this method is the placeholder where
+        // fine-grained per-action checks land in Phase 2b when the
+        // host exposes a `hasPermission` helper.
+    }
+
+    private struct function collectFormData( required struct rc ){
+        return {
+            name                : trim( arguments.rc.name                ?: "" ),
+            description         : arguments.rc.description               ?: "",
+            organizationId      : arguments.rc.organizationId            ?: "",
+            visibilityScope     : arguments.rc.visibilityScope           ?: "all_org_members",
+            lifecycleStatus     : arguments.rc.lifecycleStatus           ?: "active",
+            startDate           : len( arguments.rc.startDate ?: "" ) ? arguments.rc.startDate : "",
+            endDate             : len( arguments.rc.endDate   ?: "" ) ? arguments.rc.endDate   : "",
+            timeTrackingEnabled : truthy( arguments.rc.timeTrackingEnabled ?: false )
+        };
+    }
+
+    private struct function formDataDefaults( required struct rc ){
+        return {
+            name                : arguments.rc.name                ?: "",
+            description         : arguments.rc.description         ?: "",
+            organizationId      : arguments.rc.organizationId      ?: "",
+            visibilityScope     : arguments.rc.visibilityScope     ?: "all_org_members",
+            lifecycleStatus     : arguments.rc.lifecycleStatus     ?: "active",
+            startDate           : arguments.rc.startDate           ?: "",
+            endDate             : arguments.rc.endDate             ?: "",
+            timeTrackingEnabled : truthy( arguments.rc.timeTrackingEnabled ?: false )
+        };
+    }
+
+    private struct function projectToFormData( required any project ){
+        return {
+            name                : arguments.project.getName()                ?: "",
+            description         : arguments.project.getDescription()         ?: "",
+            organizationId      : arguments.project.getOrganizationId()      ?: "",
+            visibilityScope     : arguments.project.getVisibilityScope()     ?: "all_org_members",
+            lifecycleStatus     : arguments.project.getLifecycleStatus()     ?: "active",
+            startDate           : toString( arguments.project.getStartDate() ?: "" ),
+            endDate             : toString( arguments.project.getEndDate()   ?: "" ),
+            timeTrackingEnabled : !!arguments.project.getTimeTrackingEnabled()
+        };
+    }
+
+    private boolean function truthy( required any v ){
+        if ( isBoolean( arguments.v ) ) return arguments.v;
+        var s = lCase( toString( arguments.v ?: "" ) );
+        return s == "true" || s == "1" || s == "on" || s == "yes";
+    }
+
+}

@@ -126,18 +126,37 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( hits[ 1 ].requiredPermission ).toBe( "pm.admin" );
             } );
 
-            it( "claims the three BUILD-PLAN top-level URLs in RouteClaimsRegistry@core", function(){
-                expect( variables.routeClaims.findByPath( "/agent/pm"       ) ).notToBeNull();
+            it( "claims the two cross-surface BUILD-PLAN URLs in RouteClaimsRegistry@core", function(){
+                // /agent/pm itself is now owned by PM's module Router
+                // (entryPoint='agent/pm') and is NOT a route claim.
+                // The two cross-surface URLs that PM's own router
+                // cannot reach (portal + admin) ARE route claims.
                 expect( variables.routeClaims.findByPath( "/pm"             ) ).notToBeNull();
                 expect( variables.routeClaims.findByPath( "/agent/admin/pm" ) ).notToBeNull();
-                // All three should route to the same handler/action at
-                // Phase 1; Phase 2 splits admin and Phase 11 splits portal.
-                for ( var path in [ "/agent/pm", "/pm", "/agent/admin/pm" ] ) {
+                expect( variables.routeClaims.findByPath( "/agent/pm"       ) ).toBeNull();
+                for ( var path in [ "/pm", "/agent/admin/pm" ] ) {
                     var claim = variables.routeClaims.findByPath( path );
                     expect( claim.module  ).toBe( "tesserabx-pm" );
                     expect( claim.handler ).toBe( "Main" );
                     expect( claim.action  ).toBe( "index" );
                 }
+            } );
+
+            // ---- Phase 2a: project CRUD service wiring.
+
+            it( "binds ProjectService@tesserabx-pm in WireBox", function(){
+                var svc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+                expect( svc ).notToBeNull();
+            } );
+
+            it( "binds VisibilityService@tesserabx-pm in WireBox", function(){
+                var svc = variables.wb.getInstance( "VisibilityService@tesserabx-pm" );
+                expect( svc ).notToBeNull();
+            } );
+
+            it( "binds ProjectDto@tesserabx-pm in WireBox", function(){
+                var dto = variables.wb.getInstance( "ProjectDto@tesserabx-pm" );
+                expect( dto ).notToBeNull();
             } );
 
             it( "registers the pm.default-template-id per-tenant setting", function(){

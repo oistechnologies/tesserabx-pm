@@ -1,0 +1,46 @@
+/**
+ * ProjectDto: maps a Project entity to a plain struct with
+ * snake_case keys for serialization (REST API responses, event
+ * payloads, audit-log metadata, etc.).
+ *
+ * Pattern mirrors the host's TicketDto@tickets:
+ * modules_app/tickets/models/dtos/TicketDto.bx.
+ *
+ * Null-coalesce every nullable column so the shape is stable. JSON
+ * serializers (and downstream JS clients) choke on null where they
+ * expect a string; empty strings keep the contract predictable.
+ *
+ * Timestamps are stringified via toString() so the JSON encoder
+ * never has to special-case java.sql.Timestamp.
+ */
+class singleton=true {
+
+    public struct function fromProject( required any entity ){
+        var p = arguments.entity;
+        return {
+            id                     : p.getId(),
+            organization_id        : p.getOrganizationId()        ?: "",
+            name                   : p.getName()                  ?: "",
+            description            : p.getDescription()           ?: "",
+            visibility_scope       : p.getVisibilityScope()       ?: "all_org_members",
+            lifecycle_status       : p.getLifecycleStatus()       ?: "active",
+            start_date             : toString( p.getStartDate() ?: "" ),
+            end_date               : toString( p.getEndDate()   ?: "" ),
+            time_tracking_enabled  : !!p.getTimeTrackingEnabled(),
+            is_template            : !!p.getIsTemplate(),
+            template_source_id     : p.getTemplateSourceId()      ?: "",
+            created_by_type        : p.getCreatedByType()         ?: "",
+            created_by_id          : p.getCreatedById()           ?: "",
+            updated_by_type        : p.getUpdatedByType()         ?: "",
+            updated_by_id          : p.getUpdatedById()           ?: "",
+            created_at             : toString( p.getCreatedAt() ?: "" ),
+            updated_at             : toString( p.getUpdatedAt() ?: "" ),
+            deleted_at             : toString( p.getDeletedAt() ?: "" )
+        };
+    }
+
+    public array function fromProjectArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromProject( e ) );
+    }
+
+}

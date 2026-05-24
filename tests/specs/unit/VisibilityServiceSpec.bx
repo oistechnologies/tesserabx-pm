@@ -1,0 +1,177 @@
+/**
+ * VisibilityServiceSpec: covers the Phase 2a project-visibility
+ * rules (BUILD-PLAN §3.3 Option C, project portion).
+ *
+ * Agent viewers see every project (no Option C filter). Contact
+ * viewers see projects in their org per the project's
+ * `visibility_scope`:
+ *   - all_org_members  -> visible to every contact in the org
+ *   - specific_members -> visible only when a pm_project_members
+ *                         row binds the contact to the project
+ *
+ * Each `it()` builds its own organization + project rows and
+ * tears them down in `afterEach` via the organizations CASCADE
+ * (deleting the org drops the project, members, etc.).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb    = getController().getWireBox();
+        variables.vis   = variables.wb.getInstance( "VisibilityService@tesserabx-pm" );
+        variables.psvc  = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "VisibilityService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute(
+                        "DELETE FROM organizations WHERE id = :id",
+                        { id : orgId }
+                    );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            describe( "validateViewer", function(){
+                it( "throws when accountType is neither agent nor contact", function(){
+                    expect( function(){
+                        variables.vis.canViewProject(
+                            { accountType : "alien", accountId : "x" },
+                            javaCast( "null", "" )
+                        );
+                    } ).toThrow( type = "VisibilityService.InvalidViewer" );
+                } );
+
+                it( "throws when a contact viewer is missing organizationId", function(){
+                    expect( function(){
+                        variables.vis.canViewProject(
+                            { accountType : "contact", accountId : "c1" },
+                            javaCast( "null", "" )
+                        );
+                    } ).toThrow( type = "VisibilityService.InvalidViewer" );
+                } );
+            } );
+
+            describe( "canViewProject for agents", function(){
+                it( "returns true regardless of project visibility_scope", function(){
+                    var orgId = newOrg( fixtureOrgIds );
+                    var p     = variables.psvc.createProject( { organizationId : orgId, name : "vis-agent-1" } );
+                    var agentViewer = { accountType : "agent", accountId : "agent-1", organizationId : "" };
+                    expect( variables.vis.canViewProject( agentViewer, p ) ).toBeTrue();
+
+                    variables.psvc.updateProject( p.getId(), { visibilityScope : "specific_members" } );
+                    var p2 = variables.psvc.getProject( p.getId() );
+                    expect( variables.vis.canViewProject( agentViewer, p2 ) ).toBeTrue();
+                } );
+            } );
+
+            describe( "canViewProject for contacts (all_org_members)", function(){
+                it( "any contact in the org sees the project", function(){
+                    var orgId = newOrg( fixtureOrgIds );
+                    var p     = variables.psvc.createProject( {
+                        organizationId  : orgId,
+                        name            : "vis-all-1",
+                        visibilityScope : "all_org_members"
+                    } );
+                    var contactViewer = {
+                        accountType    : "contact",
+                        accountId      : createUUID(),
+                        organizationId : orgId
+                    };
+                    expect( variables.vis.canViewProject( contactViewer, p ) ).toBeTrue();
+                } );
+            } );
+
+            describe( "canViewProject for contacts (specific_members)", function(){
+                it( "only contacts in pm_project_members see the project", function(){
+                    var orgId = newOrg( fixtureOrgIds );
+                    var p     = variables.psvc.createProject( {
+                        organizationId  : orgId,
+                        name            : "vis-specific-1",
+                        visibilityScope : "specific_members"
+                    } );
+                    // Use bare UUIDs; member_id is varchar(36).
+                    var memberId    = createUUID();
+                    var nonMemberId = createUUID();
+
+                    // Seed a pm_project_members row binding `memberId`
+                    // to the project. The Phase 6 ProjectMember service
+                    // does this through Quick; the SQL form keeps the
+                    // spec independent of services not yet built.
+                    queryExecute(
+                        "INSERT INTO pm_project_members
+                            ( id, project_id, organization_id, member_type, member_id, role,
+                              added_by_type, added_by_id, added_at, created_at, updated_at )
+                         VALUES
+                            ( :id, :pid, :org, 'contact', :mid, 'viewer',
+                              'system', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+                        {
+                            id  : createUUID(),
+                            pid : p.getId(),
+                            org : orgId,
+                            mid : memberId
+                        }
+                    );
+
+                    var memberViewer = {
+                        accountType    : "contact",
+                        accountId      : memberId,
+                        organizationId : orgId
+                    };
+                    var strangerViewer = {
+                        accountType    : "contact",
+                        accountId      : nonMemberId,
+                        organizationId : orgId
+                    };
+
+                    expect( variables.vis.canViewProject( memberViewer,   p ) ).toBeTrue();
+                    expect( variables.vis.canViewProject( strangerViewer, p ) ).toBeFalse();
+                } );
+            } );
+
+            describe( "assertCanViewProject", function(){
+                it( "throws ProjectNotVisible when canViewProject returns false", function(){
+                    var orgId = newOrg( fixtureOrgIds );
+                    var p     = variables.psvc.createProject( {
+                        organizationId  : orgId,
+                        name            : "assert-deny",
+                        visibilityScope : "specific_members"
+                    } );
+                    var stranger = {
+                        accountType    : "contact",
+                        accountId      : "no-membership",
+                        organizationId : orgId
+                    };
+                    expect( function(){
+                        variables.vis.assertCanViewProject( stranger, p );
+                    } ).toThrow( type = "VisibilityService.ProjectNotVisible" );
+                } );
+            } );
+
+        } );
+    }
+
+    // ---------- fixture helpers ----------
+
+    private string function newOrg( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            {
+                id   : orgId,
+                name : "pm-vis-" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                slug : "pm-vis-" & lCase( replace( createUUID(), "-", "", "all" ) )
+            }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        return orgId;
+    }
+
+}

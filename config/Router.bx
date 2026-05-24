@@ -1,23 +1,43 @@
 /**
  * tesserabx-pm module router.
  *
- * PM's external URL surface (/agent/pm, /pm, /agent/admin/pm) is
- * declared in settings.tesserabx.routeClaims in ModuleConfig.bx
- * and bound to ColdBox by the host's AddonRouteClaimsRegistrar on
- * `afterAspectsLoad`. That keeps the BUILD-PLAN paths exact and
- * sidesteps ColdBox 8's module-Router entryPoint auto-prefix.
+ * PM owns the `/agent/pm` URL space via the multi-segment entryPoint
+ * declared in ModuleConfig.bx. All routes here auto-prefix with
+ * /agent/pm; the agent firewall (declared in the host's main
+ * cbSecurity config) covers them by URL regex.
  *
- * This router only handles routes under the entryPoint
- * `/tesserabx-pm/*`, which is reserved for any PM-internal admin
- * URLs that don't need to live on the agent or portal surfaces.
- * The single `/` route below targets the same Main.index handler
- * for parity, so a developer hitting the entry point gets the
- * placeholder rather than a 404 while exploring the module.
+ * The two cross-surface URLs (`/pm` and `/agent/admin/pm`) are
+ * declared via settings.tesserabx.routeClaims in ModuleConfig.bx
+ * and bound through the host's AddonRouteClaimsRegistrar.
+ *
+ * Same-pattern routes must be declared once with `.toAction({...})`
+ * mapping each verb to its action. The host's agent module Router
+ * has a comment about this: calling route(pattern).to(event) twice
+ * with the same pattern collapses into a single route whose event
+ * ends up empty, which silently falls through to ColdBox's default
+ * `:handler/:action` resolution.
  */
 class {
 
     function configure(){
-        route( "/" ).withVerbs( "GET" ).to( "Main.index" );
+        // /agent/pm landing -> Projects.index
+        route( "/" ).to( "Projects.index" );
+
+        // Project CRUD. Most-specific patterns first so /projects/new
+        // and /projects/:id/* do not collide with /projects/:id.
+        route( "projects/new" ).withHandler( "Projects" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
+        route( "projects/:id/archive" ).withVerbs( "POST" ).to( "Projects.archive" );
+        route( "projects/:id/restore" ).withVerbs( "POST" ).to( "Projects.restore" );
+        route( "projects/:id/delete"  ).withVerbs( "POST" ).to( "Projects.remove" );
+        route( "projects/:id/edit"    ).to( "Projects.edit" );
+        route( "projects/:id"         ).withHandler( "Projects" ).toAction( {
+            "GET"  : "show",
+            "POST" : "update"
+        } );
+        route( "projects" ).to( "Projects.index" );
     }
 
 }

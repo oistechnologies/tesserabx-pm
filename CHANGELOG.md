@@ -6,6 +6,19 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 2a: Project CRUD on the Agent Surface
+
+- `entryPoint` changed from `tesserabx-pm` to `agent/pm` (multi-segment, mirrors the host's nested admin module). PM's own `config/Router.bx` now naturally handles every `/agent/pm/*` URL; the agent firewall covers them by URL regex.
+- `routeClaims` reduced from 3 entries to 2: only the cross-surface URLs `/pm` (portal) and `/agent/admin/pm` (admin) need claims now. `/agent/pm` is owned directly by PM's module router.
+- `ProjectService@tesserabx-pm` ships full CRUD on `pm_projects`: `getProject`, `listProjects`, `createProject`, `updateProject`, `archiveProject`, `restoreProject`, `removeProject`. Emits `onPmProjectCreated` and `onPmProjectArchived` async events through `EventPayloadBuilder@core`, writes `tesserabx-pm.project_created` and `tesserabx-pm.project_archived` rows to the host audit log via `AuditService@audit.record`.
+- `VisibilityService@tesserabx-pm` enforces BUILD-PLAN §3.3 Option C for projects: agents see everything, contacts see `all_org_members` projects in their org plus any `specific_members` project where they have a `pm_project_members` row. Exposes `projectsQueryForViewer`, `canViewProject`, `assertCanViewProject`.
+- `IProjectService@tesserabx-pm` contract class documenting the service surface for cross-module callers (BoxLang has no interface keyword; the contract is a documentation-only class that throws on direct instantiation).
+- `ProjectDto@tesserabx-pm` singleton with `fromProject` and `fromProjectArray` returning snake_case structs; pattern mirrors the host's `TicketDto@tickets`.
+- Agent surface CRUD: `handlers/Projects.bx` + views `views/projects/{index,show,new,edit}.bxm` implementing the full list / detail / create / edit / archive / restore / soft-delete flow with AdminLTE styling and cbmessagebox flash feedback. The page renders inside the host's Agent layout (preHandler sets it).
+- New test bundles: `tests/specs/unit/ProjectServiceSpec.bx` (8 specs covering create, update, archive, restore, soft-delete, list filters; uses real organizations fixtures with CASCADE cleanup) and `tests/specs/unit/VisibilityServiceSpec.bx` (6 specs covering viewer validation, agent path, all_org_members, specific_members, assertion guard).
+- `InstallSpec.bx` updated for the new routeClaims shape (asserts `/agent/pm` is NOT a claim, the two cross-surface URLs ARE) plus three new probes for `ProjectService`, `VisibilityService`, `ProjectDto` WireBox bindings. 18 specs.
+- Deferred to Phase 2b: Task/Subtask services, handlers, and views; per-project ProjectStatus CRUD UI; REST API handlers under `/api/v1/pm/*` and the `apiResources` manifest; `config/cbSecurity.bx` per-action permission gating (Phase 2a relies on the host's agent firewall for coarse `/agent/pm/*` gating).
+
 ### Phase 1: Entities, Migrations, Permissions, Roles, Navigation Skeleton
 
 - 17 migrations under `migrations/` creating the PM schema in dependency order: `pm_project_templates`, `pm_projects`, `pm_project_statuses`, `pm_labels`, `pm_custom_fields`, `pm_project_members`, `pm_project_events`, `pm_tasks`, `pm_subtasks`, `pm_task_labels`, `pm_task_tickets`, `pm_comments`, `pm_watchers`, `pm_time_logs`, `pm_custom_field_values`, `pm_attachments`, `pm_mentions`. Every tenant-scoped table carries `organization_id` with `ON DELETE CASCADE` from its first migration.

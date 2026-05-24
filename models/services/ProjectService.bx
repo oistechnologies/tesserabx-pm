@@ -1,0 +1,322 @@
+/**
+ * ProjectService: CRUD over pm_projects with the host's conventions.
+ *
+ * The service owns business logic; handlers orchestrate. No SQL in
+ * handlers; no permission checks in this service (handlers gate via
+ * cbSecurity / `pm.*` permissions before calling).
+ *
+ * Tenant scope is automatic for reads: every Project query goes
+ * through Quick's global scope (TenantScope@contacts applies the
+ * org cut for contact viewers; no-op for agents). Reads through
+ * VisibilityService layer Option C on top of that.
+ *
+ * Writes always set organization_id explicitly from the input. The
+ * service does not infer the tenant context to keep agent-side
+ * writes explicit about which org the project belongs to.
+ *
+ * Soft-delete via deleted_at per BUILD-PLAN §3.13. `archive` flips
+ * lifecycle_status to "archived" without deleting; `remove` does
+ * the soft delete (the row is hidden behind a non-null deleted_at
+ * but kept for audit / restore). `restore` reverses either action.
+ *
+ * Events emitted (BUILD-PLAN §3.11 + §9 Phase 4):
+ *   onPmProjectCreated  (async)
+ *   onPmProjectArchived (async)
+ *   The full event catalog lands in Phase 4 alongside the project
+ *   event timeline; Phase 2 emits the two creation/archive events
+ *   so the audit log starts capturing project lifecycle from day
+ *   one of CRUD.
+ */
+class singleton=true {
+
+    property name="wirebox"              inject="wirebox";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+    property name="auditService"         inject="AuditService@audit";
+
+    variables.VALID_VISIBILITY_SCOPES = [ "all_org_members", "specific_members" ];
+    variables.VALID_LIFECYCLE         = [ "active", "archived", "completed" ];
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    /**
+     * Get a project by id. Returns null when not found. Does NOT
+     * apply Option C visibility; callers expecting the contact-side
+     * view route through VisibilityService.assertCanViewProject().
+     */
+    public any function getProject( required string id ){
+        var p = wirebox.getInstance( "Project@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .whereNull( "deleted_at" )
+            .first();
+        return isNull( p ) ? javaCast( "null", "" ) : p;
+    }
+
+    /**
+     * List projects, optionally filtered. Returns Quick entities.
+     * Agent callers see across orgs; service handlers may swap to
+     * `listProjectsForViewer` to apply Option C for contacts.
+     */
+    public array function listProjects(
+        string organizationId    = "",
+        string lifecycleStatus   = "",
+        string search            = "",
+        boolean includeArchived  = false,
+        numeric limit            = 100,
+        numeric offset           = 0
+    ){
+        var q = wirebox.getInstance( "Project@tesserabx-pm" ).withoutGlobalScope();
+        if ( len( arguments.organizationId ) )  q = q.where( "organization_id", arguments.organizationId );
+        if ( len( arguments.lifecycleStatus ) ) q = q.where( "lifecycle_status", arguments.lifecycleStatus );
+        if ( !arguments.includeArchived )       q = q.where( "lifecycle_status", "!=", "archived" );
+        if ( len( arguments.search ) )          q = q.whereLike( "name", "%" & arguments.search & "%" );
+        q = q.whereNull( "deleted_at" );
+        return q.orderBy( "created_at", "desc" )
+                .limit(   arguments.limit )
+                .offset(  arguments.offset )
+                .get();
+    }
+
+    // ---------------------------------------------------------------
+    // Writes
+    // ---------------------------------------------------------------
+
+    /**
+     * Create a project. Required: organizationId, name. Everything
+     * else is defaulted. Emits `onPmProjectCreated` async.
+     *
+     * `templateSourceId` is optional; ProjectService does NOT
+     * currently hydrate from a template (Phase 7 TemplateService).
+     * Phase 2 stores the id so the project carries provenance for
+     * later phases.
+     */
+    public any function createProject( required struct data ){
+        if ( !len( arguments.data.organizationId ?: "" ) ) {
+            throw( type = "ProjectService.MissingField", message = "organizationId is required to create a project." );
+        }
+        if ( !len( arguments.data.name ?: "" ) ) {
+            throw( type = "ProjectService.MissingField", message = "name is required to create a project." );
+        }
+
+        var visibility = arguments.data.visibilityScope ?: "all_org_members";
+        if ( !arrayContains( variables.VALID_VISIBILITY_SCOPES, visibility ) ) {
+            throw( type = "ProjectService.InvalidVisibilityScope", message = "visibilityScope must be one of #arrayToList( variables.VALID_VISIBILITY_SCOPES )#." );
+        }
+
+        var project = wirebox.getInstance( "Project@tesserabx-pm" );
+        project.setId(                  createUUID() );
+        project.setOrganizationId(      arguments.data.organizationId );
+        project.setName(                arguments.data.name );
+        project.setDescription(         arguments.data.description     ?: "" );
+        project.setVisibilityScope(     visibility );
+        project.setLifecycleStatus(     "active" );
+        project.setStartDate(           arguments.data.startDate       ?: javaCast( "null", "" ) );
+        project.setEndDate(             arguments.data.endDate         ?: javaCast( "null", "" ) );
+        project.setTimeTrackingEnabled( arguments.data.timeTrackingEnabled ?: false );
+        project.setIsTemplate(          false );
+        project.setTemplateSourceId(    arguments.data.templateSourceId ?: javaCast( "null", "" ) );
+        project.setCreatedByType(       arguments.data.actorType ?: "system" );
+        project.setCreatedById(         arguments.data.actorId   ?: javaCast( "null", "" ) );
+        project.setUpdatedByType(       arguments.data.actorType ?: "system" );
+        project.setUpdatedById(         arguments.data.actorId   ?: javaCast( "null", "" ) );
+        project.save();
+
+        announceLifecycleEvent(
+            eventName : "onPmProjectCreated",
+            project   : project,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: "system"
+        );
+        writeAuditEvent(
+            type    : "tesserabx-pm.project_created",
+            project : project,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: ""
+        );
+
+        return project;
+    }
+
+    /**
+     * Update an existing project. Skips any field not present in
+     * `data`. Throws if the project is not found.
+     */
+    public any function updateProject( required string id, required struct data ){
+        var project = getProject( arguments.id );
+        if ( isNull( project ) ) {
+            throw( type = "ProjectService.UnknownProject", message = "No project with id [#arguments.id#]." );
+        }
+
+        if ( structKeyExists( arguments.data, "name"            ) ) project.setName(            arguments.data.name );
+        if ( structKeyExists( arguments.data, "description"     ) ) project.setDescription(     arguments.data.description );
+        if ( structKeyExists( arguments.data, "visibilityScope" ) ) {
+            if ( !arrayContains( variables.VALID_VISIBILITY_SCOPES, arguments.data.visibilityScope ) ) {
+                throw( type = "ProjectService.InvalidVisibilityScope", message = "visibilityScope must be one of #arrayToList( variables.VALID_VISIBILITY_SCOPES )#." );
+            }
+            project.setVisibilityScope( arguments.data.visibilityScope );
+        }
+        if ( structKeyExists( arguments.data, "lifecycleStatus" ) ) {
+            if ( !arrayContains( variables.VALID_LIFECYCLE, arguments.data.lifecycleStatus ) ) {
+                throw( type = "ProjectService.InvalidLifecycleStatus", message = "lifecycleStatus must be one of #arrayToList( variables.VALID_LIFECYCLE )#." );
+            }
+            project.setLifecycleStatus( arguments.data.lifecycleStatus );
+        }
+        if ( structKeyExists( arguments.data, "startDate"           ) ) project.setStartDate(           arguments.data.startDate );
+        if ( structKeyExists( arguments.data, "endDate"             ) ) project.setEndDate(             arguments.data.endDate );
+        if ( structKeyExists( arguments.data, "timeTrackingEnabled" ) ) project.setTimeTrackingEnabled( !!arguments.data.timeTrackingEnabled );
+
+        project.setUpdatedByType( arguments.data.actorType ?: "system" );
+        project.setUpdatedById(   arguments.data.actorId   ?: javaCast( "null", "" ) );
+        project.save();
+
+        return project;
+    }
+
+    /**
+     * Archive a project. Sets lifecycle_status='archived'; does not
+     * touch deleted_at. Reversible via restoreProject().
+     */
+    public any function archiveProject( required string id, struct data = {} ){
+        var project = getProject( arguments.id );
+        if ( isNull( project ) ) {
+            throw( type = "ProjectService.UnknownProject", message = "No project with id [#arguments.id#]." );
+        }
+
+        project.setLifecycleStatus( "archived" );
+        project.setUpdatedByType( arguments.data.actorType ?: "system" );
+        project.setUpdatedById(   arguments.data.actorId   ?: javaCast( "null", "" ) );
+        project.save();
+
+        announceLifecycleEvent(
+            eventName : "onPmProjectArchived",
+            project   : project,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: "system"
+        );
+        writeAuditEvent(
+            type      : "tesserabx-pm.project_archived",
+            project   : project,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: ""
+        );
+
+        return project;
+    }
+
+    /**
+     * Restore an archived or soft-deleted project. Sets
+     * lifecycle_status='active' and clears deleted_at.
+     *
+     * deleted_at is cleared with a direct UPDATE because Quick's
+     * `setDeletedAt(javaCast("null", ""))` + `save()` round-trip
+     * does not reliably persist the NULL through the JDBC bind
+     * layer. Lifecycle status updates use the regular entity path.
+     */
+    public any function restoreProject( required string id, struct data = {} ){
+        // Pull directly so we can restore soft-deleted rows too.
+        var project = wirebox.getInstance( "Project@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        if ( isNull( project ) ) {
+            throw( type = "ProjectService.UnknownProject", message = "No project with id [#arguments.id#]." );
+        }
+
+        queryExecute(
+            "UPDATE pm_projects
+             SET    deleted_at       = NULL,
+                    lifecycle_status = 'active',
+                    updated_by_type  = :actorType,
+                    updated_by_id    = NULLIF( :actorId, '' ),
+                    updated_at       = CURRENT_TIMESTAMP
+             WHERE  id = :id",
+            {
+                id        : arguments.id,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: ""
+            }
+        );
+
+        // Re-read so callers get the fresh state.
+        return getProject( arguments.id );
+    }
+
+    /**
+     * Soft-delete the project. Stamps deleted_at; the row stays
+     * for audit. Use restoreProject() to undo.
+     */
+    public any function removeProject( required string id, struct data = {} ){
+        var project = getProject( arguments.id );
+        if ( isNull( project ) ) {
+            throw( type = "ProjectService.UnknownProject", message = "No project with id [#arguments.id#]." );
+        }
+
+        project.setDeletedAt(     now() );
+        project.setUpdatedByType( arguments.data.actorType ?: "system" );
+        project.setUpdatedById(   arguments.data.actorId   ?: javaCast( "null", "" ) );
+        project.save();
+
+        return project;
+    }
+
+    // ---------- internals ----------
+
+    private void function announceLifecycleEvent(
+        required string eventName,
+        required any project,
+        required string actorType,
+        required string actorId
+    ){
+        try {
+            interceptorService.announce(
+                arguments.eventName,
+                eventPayloadBuilder.build(
+                    event          : arguments.eventName,
+                    organizationId : arguments.project.getOrganizationId() ?: "",
+                    actorType      : arguments.actorType,
+                    actorId        : arguments.actorId,
+                    entity         : { type : "Project", id : arguments.project.getId() }
+                ),
+                true
+            );
+        } catch ( any e ) {
+            // Event emission is best-effort. A misbehaving listener
+            // must not break a write; log and move on.
+            writeLog(
+                text : "ProjectService.announceLifecycleEvent failed for [#arguments.eventName#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private void function writeAuditEvent(
+        required string type,
+        required any project,
+        required string actorType,
+        required string actorId
+    ){
+        try {
+            auditService.record(
+                eventType      : arguments.type,
+                source         : "tesserabx-pm",
+                organizationId : arguments.project.getOrganizationId() ?: "",
+                actorType      : arguments.actorType,
+                actorId        : arguments.actorId,
+                entityType     : "Project",
+                entityId       : arguments.project.getId(),
+                metadata       : { name : arguments.project.getName() }
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "ProjectService.writeAuditEvent failed for [#arguments.type#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}
