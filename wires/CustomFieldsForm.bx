@@ -1,0 +1,116 @@
+/**
+ * CustomFieldsForm: render the per-project custom fields applicable
+ * to a Task or Subtask and edit their values inline.
+ *
+ * Values for the current valuable are loaded on mount and kept in
+ * `data.values` keyed by custom field id. Save runs every field
+ * through validateAndSerialize so required + format errors land at
+ * the same boundary the API would enforce.
+ *
+ * Embed from views/tasks/show.bxm and views/subtasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "CustomFieldsForm@tesserabx-pm",
+ *       params = {
+ *           valuableType   : "task",        // or "subtask"
+ *           valuableId     : prc.task.getId(),
+ *           projectId      : prc.project.getId(),
+ *           organizationId : prc.task.getOrganizationId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="cfService" inject="CustomFieldService@tesserabx-pm";
+
+    data = {
+        "valuableType"   : "",
+        "valuableId"     : "",
+        "projectId"      : "",
+        "organizationId" : "",
+        "values"         : {},
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.valuableType   = arguments.params.valuableType   ?: "";
+        data.valuableId     = arguments.params.valuableId     ?: "";
+        data.projectId      = arguments.params.projectId      ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+
+        var loaded = cfService.valuesForValuable( data.valuableType, data.valuableId );
+        var seeded = {};
+        for ( var k in loaded ) seeded[ k ] = loaded[ k ];
+        data.values = seeded;
+    }
+
+    function fields(){
+        if ( !len( data.projectId ) || !len( data.valuableType ) ) return [];
+        return cfService.listApplicableForValuable( data.projectId, data.valuableType );
+    }
+
+    function save(){
+        var defs = fields();
+        var errors = [];
+        for ( var f in defs ) {
+            try {
+                cfService.setValue(
+                    customFieldId  : f.getId(),
+                    valuableType   : data.valuableType,
+                    valuableId     : data.valuableId,
+                    organizationId : data.organizationId,
+                    value          : data.values[ f.getId() ] ?: ""
+                );
+            } catch ( any e ) {
+                errors.append( e.message );
+            }
+        }
+        if ( arrayLen( errors ) ) {
+            notice( "Saved with errors: " & arrayToList( errors, " " ), "danger" );
+        } else {
+            notice( "Custom fields saved.", "success" );
+        }
+        // Re-read so any normalised value (eg. dropdown casing) is
+        // reflected.
+        var loaded = cfService.valuesForValuable( data.valuableType, data.valuableId );
+        var refreshed = {};
+        for ( var k in loaded ) refreshed[ k ] = loaded[ k ];
+        data.values = refreshed;
+    }
+
+    // ----- Template helpers -----
+
+    function optionsFor( required any field ){
+        return cfService.decodeOptions( arguments.field.getOptionsJson() ?: "" );
+    }
+
+    function isSelected( required string fieldId, required string option ){
+        var current = data.values[ arguments.fieldId ] ?: "";
+        if ( isArray( current ) ) return arrayContains( current, arguments.option );
+        return toString( current ) == arguments.option;
+    }
+
+    /**
+     * Toggle a value inside a multiselect field's current array.
+     * Wired up via wire:click on each multi-select checkbox so the
+     * picker stays usable without a real `<select multiple>`.
+     */
+    function toggleMulti( fieldId, option ){
+        var current = data.values[ arguments.fieldId ] ?: [];
+        if ( !isArray( current ) ) current = [];
+        var next = duplicate( current );
+        if ( arrayContains( next, arguments.option ) ) {
+            arrayDelete( next, arguments.option );
+        } else {
+            next.append( arguments.option );
+        }
+        data.values[ arguments.fieldId ] = next;
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

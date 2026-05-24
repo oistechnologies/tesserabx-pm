@@ -1,0 +1,29 @@
+/**
+ * ICustomFieldService: documentation contract for the per-project
+ * custom field service (definitions + value storage).
+ *
+ * Methods (live signatures on CustomFieldService):
+ *
+ *   any    getField( id )
+ *   array  listForProject( projectId, appliesTo = "" )
+ *   array  listApplicableForValuable( projectId, valuableType )
+ *   any    createField( data )
+ *   any    updateField( id, data )
+ *   any    removeField( id )
+ *   any    getValue( customFieldId, valuableType, valuableId )
+ *   struct valuesForValuable( valuableType, valuableId )
+ *   any    setValue( customFieldId, valuableType, valuableId, organizationId, value )
+ *   void   clearValue( customFieldId, valuableType, valuableId )
+ *   string validateAndSerialize( field, rawValue )
+ *   array  decodeOptions( optionsJson )
+ */
+class {
+
+    function init(){
+        throw(
+            type    = "ICustomFieldService.DoNotInstantiate",
+            message = "ICustomFieldService is a documentation contract. Inject CustomFieldService@tesserabx-pm instead."
+        );
+    }
+
+}

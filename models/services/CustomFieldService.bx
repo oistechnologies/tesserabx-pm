@@ -1,0 +1,376 @@
+/**
+ * CustomFieldService: per-project custom field definitions plus
+ * polymorphic value storage over Task / Subtask.
+ *
+ * BUILD-PLAN §3.16 keeps PM's custom fields separate from the host's
+ * per-tenant fields because PM users scope by project. Field types
+ * cover text, number, date, dropdown, multiselect, checkbox, url;
+ * each gets a validator on the value side.
+ *
+ * `pm_custom_field_values.value` is TEXT. Per-type encoding:
+ *   text         -> the raw string
+ *   number       -> stringified decimal (validated isNumeric on write)
+ *   date         -> ISO yyyy-mm-dd
+ *   dropdown     -> the chosen option label (must be in options_json)
+ *   multiselect  -> JSON-encoded array of option labels
+ *   checkbox     -> "true" | "false"
+ *   url          -> the raw URL (validated to start with http:// or https://)
+ *
+ * `options_json` is JSON-encoded array of strings for dropdown +
+ * multiselect; unused for everything else.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_FIELD_TYPES   = [ "text", "number", "date", "dropdown", "multiselect", "checkbox", "url" ];
+    variables.VALID_APPLIES_TO    = [ "task", "subtask", "both" ];
+    variables.VALID_VALUABLE_TYPES = [ "task", "subtask" ];
+
+    // ---------------------------------------------------------------
+    // Field definition CRUD
+    // ---------------------------------------------------------------
+
+    public any function getField( required string id ){
+        var f = wirebox.getInstance( "CustomField@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( f ) ? javaCast( "null", "" ) : f;
+    }
+
+    public array function listForProject( required string projectId, string appliesTo = "" ){
+        var q = wirebox.getInstance( "CustomField@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId );
+        if ( len( arguments.appliesTo ) ) q.where( "applies_to", arguments.appliesTo );
+        return q.orderBy( "sort_order", "asc" ).orderBy( "name", "asc" ).get();
+    }
+
+    /**
+     * Fields applicable to a particular valuable kind: applies_to
+     * matches OR is "both". Used by CustomFieldsForm.
+     */
+    public array function listApplicableForValuable(
+        required string projectId,
+        required string valuableType
+    ){
+        // Closure cannot see outer `arguments` (its own arguments
+        // scope only carries the builder `q`), so capture first.
+        var vt = arguments.valuableType;
+        return wirebox.getInstance( "CustomField@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId )
+            .where( function( q ){
+                q.where( "applies_to", vt ).orWhere( "applies_to", "both" );
+            } )
+            .orderBy( "sort_order", "asc" )
+            .orderBy( "name",       "asc" )
+            .get();
+    }
+
+    public any function createField( required struct data ){
+        if ( !len( arguments.data.projectId      ?: "" ) ) throw( type = "CustomFieldService.MissingField", message = "projectId is required." );
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "CustomFieldService.MissingField", message = "organizationId is required." );
+        if ( !len( arguments.data.name           ?: "" ) ) throw( type = "CustomFieldService.MissingField", message = "name is required." );
+        if ( !len( arguments.data.fieldType      ?: "" ) ) throw( type = "CustomFieldService.MissingField", message = "fieldType is required." );
+
+        if ( !arrayContains( variables.VALID_FIELD_TYPES, arguments.data.fieldType ) ) {
+            throw( type = "CustomFieldService.InvalidType", message = "fieldType must be one of #arrayToList( variables.VALID_FIELD_TYPES )#." );
+        }
+        var appliesTo = arguments.data.appliesTo ?: "both";
+        if ( !arrayContains( variables.VALID_APPLIES_TO, appliesTo ) ) {
+            throw( type = "CustomFieldService.InvalidAppliesTo", message = "appliesTo must be one of #arrayToList( variables.VALID_APPLIES_TO )#." );
+        }
+        if ( fieldExistsByName( arguments.data.projectId, arguments.data.name ) ) {
+            throw( type = "CustomFieldService.DuplicateName", message = "A field named [#arguments.data.name#] already exists on this project." );
+        }
+
+        var optionsJson = normalizeOptionsForStorage( arguments.data.fieldType, arguments.data.options ?: "" );
+
+        var f = wirebox.getInstance( "CustomField@tesserabx-pm" );
+        f.setId(             createUUID() );
+        f.setProjectId(      arguments.data.projectId );
+        f.setOrganizationId( arguments.data.organizationId );
+        f.setName(           arguments.data.name );
+        f.setFieldType(      arguments.data.fieldType );
+        f.setOptionsJson(    len( optionsJson ) ? optionsJson : javaCast( "null", "" ) );
+        f.setIsRequired(     !!( arguments.data.isRequired ?: false ) );
+        f.setAppliesTo(      appliesTo );
+        f.setSortOrder(      int( val( arguments.data.sortOrder ?: 0 ) ) );
+        f.save();
+        return f;
+    }
+
+    public any function updateField( required string id, required struct data ){
+        var f = getField( arguments.id );
+        if ( isNull( f ) ) throw( type = "CustomFieldService.UnknownField", message = "No custom field with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "name" ) ) {
+            var newName = trim( arguments.data.name );
+            if ( !len( newName ) ) throw( type = "CustomFieldService.MissingField", message = "name cannot be blank." );
+            if ( newName != f.getName() && fieldExistsByName( f.getProjectId(), newName ) ) {
+                throw( type = "CustomFieldService.DuplicateName", message = "A field named [#newName#] already exists on this project." );
+            }
+            f.setName( newName );
+        }
+        if ( structKeyExists( arguments.data, "appliesTo" ) ) {
+            if ( !arrayContains( variables.VALID_APPLIES_TO, arguments.data.appliesTo ) ) {
+                throw( type = "CustomFieldService.InvalidAppliesTo", message = "appliesTo must be one of #arrayToList( variables.VALID_APPLIES_TO )#." );
+            }
+            f.setAppliesTo( arguments.data.appliesTo );
+        }
+        if ( structKeyExists( arguments.data, "isRequired" ) ) f.setIsRequired( !!arguments.data.isRequired );
+        if ( structKeyExists( arguments.data, "sortOrder"  ) ) f.setSortOrder(  int( val( arguments.data.sortOrder ) ) );
+        if ( structKeyExists( arguments.data, "options"    ) ) {
+            var newOptions = normalizeOptionsForStorage( f.getFieldType(), arguments.data.options );
+            f.setOptionsJson( len( newOptions ) ? newOptions : javaCast( "null", "" ) );
+        }
+        // field_type is intentionally immutable after create; changing
+        // it would invalidate stored values silently. To migrate
+        // remove the field and recreate.
+        f.save();
+        return f;
+    }
+
+    public any function removeField( required string id ){
+        var f = getField( arguments.id );
+        if ( isNull( f ) ) throw( type = "CustomFieldService.UnknownField", message = "No custom field with id [#arguments.id#]." );
+        // Hard delete; FK cascade on pm_custom_field_values removes
+        // every stored value too.
+        queryExecute( "DELETE FROM pm_custom_fields WHERE id = :id", { id : arguments.id } );
+        return f;
+    }
+
+    // ---------------------------------------------------------------
+    // Value storage
+    // ---------------------------------------------------------------
+
+    public any function getValue(
+        required string customFieldId,
+        required string valuableType,
+        required string valuableId
+    ){
+        var v = wirebox.getInstance( "CustomFieldValue@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "custom_field_id", arguments.customFieldId )
+            .where( "valuable_type",   arguments.valuableType )
+            .where( "valuable_id",     arguments.valuableId )
+            .first();
+        return isNull( v ) ? javaCast( "null", "" ) : v;
+    }
+
+    /**
+     * Returns { custom_field_id : decodedValue, ... } for one
+     * valuable. Decoded means multiselect → array, checkbox → boolean,
+     * everything else → the stored string (or "").
+     */
+    public struct function valuesForValuable(
+        required string valuableType,
+        required string valuableId
+    ){
+        if ( !arrayContains( variables.VALID_VALUABLE_TYPES, arguments.valuableType ) ) return {};
+        var rows = wirebox.getInstance( "CustomFieldValue@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "valuable_type", arguments.valuableType )
+            .where( "valuable_id",   arguments.valuableId )
+            .get();
+        var out = {};
+        for ( var r in rows ) out[ r.getCustomFieldId() ] = decodeValueForRead( r.getValue() ?: "" );
+        return out;
+    }
+
+    /**
+     * Upsert one value. Validates against the field's type, required
+     * flag, and options. Pass an empty string (or null) to clear.
+     */
+    public any function setValue(
+        required string customFieldId,
+        required string valuableType,
+        required string valuableId,
+        required string organizationId,
+        any value = ""
+    ){
+        if ( !arrayContains( variables.VALID_VALUABLE_TYPES, arguments.valuableType ) ) {
+            throw( type = "CustomFieldService.InvalidValuable", message = "valuableType must be one of #arrayToList( variables.VALID_VALUABLE_TYPES )#." );
+        }
+        var field = getField( arguments.customFieldId );
+        if ( isNull( field ) ) throw( type = "CustomFieldService.UnknownField", message = "No custom field with id [#arguments.customFieldId#]." );
+
+        var serialized = validateAndSerialize( field, arguments.value );
+
+        if ( !len( serialized ) ) {
+            // Empty + not required = clear the row.
+            clearValue( arguments.customFieldId, arguments.valuableType, arguments.valuableId );
+            return javaCast( "null", "" );
+        }
+
+        // Upsert by the UNIQUE index. queryExecute keeps this safe
+        // across thread contexts.
+        queryExecute(
+            "INSERT INTO pm_custom_field_values
+                ( id, custom_field_id, organization_id, valuable_type, valuable_id, value, created_at, updated_at )
+             VALUES
+                ( :id, :cfid, :orgId, :vtype, :vid, :val, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )
+             ON CONFLICT ( custom_field_id, valuable_type, valuable_id ) DO UPDATE
+                SET value      = EXCLUDED.value,
+                    updated_at = CURRENT_TIMESTAMP",
+            {
+                id    : createUUID(),
+                cfid  : arguments.customFieldId,
+                orgId : arguments.organizationId,
+                vtype : arguments.valuableType,
+                vid   : arguments.valuableId,
+                val   : serialized
+            }
+        );
+        return getValue( arguments.customFieldId, arguments.valuableType, arguments.valuableId );
+    }
+
+    public void function clearValue(
+        required string customFieldId,
+        required string valuableType,
+        required string valuableId
+    ){
+        queryExecute(
+            "DELETE FROM pm_custom_field_values
+             WHERE  custom_field_id = :cfid
+               AND  valuable_type   = :vtype
+               AND  valuable_id     = :vid",
+            { cfid : arguments.customFieldId, vtype : arguments.valuableType, vid : arguments.valuableId }
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Validation
+    // ---------------------------------------------------------------
+
+    /**
+     * Validate a raw user input against the field's type and
+     * required flag. Returns the value serialised for storage
+     * (empty string for cleared values). Throws on invalid input.
+     */
+    public string function validateAndSerialize( required any field, any rawValue = "" ){
+        var raw      = arguments.rawValue ?: "";
+        var isEmpty  = isSimpleValue( raw ) ? !len( trim( raw ) ) : !arrayLen( raw );
+        var required = !!arguments.field.getIsRequired();
+
+        if ( isEmpty ) {
+            if ( required ) {
+                throw(
+                    type    = "CustomFieldService.RequiredField",
+                    message = "Field [#arguments.field.getName()#] is required."
+                );
+            }
+            return "";
+        }
+
+        switch ( arguments.field.getFieldType() ) {
+            case "text":
+                return toString( raw );
+            case "number":
+                if ( !isNumeric( raw ) ) throw( type = "CustomFieldService.InvalidValue", message = "[#arguments.field.getName()#] must be a number." );
+                return toString( raw );
+            case "date":
+                if ( !isDate( raw ) ) throw( type = "CustomFieldService.InvalidValue", message = "[#arguments.field.getName()#] must be a date." );
+                return dateFormat( raw, "yyyy-mm-dd" );
+            case "checkbox":
+                return ( !!raw && toString( raw ) != "false" ) ? "true" : "false";
+            case "url":
+                if ( !reFindNoCase( "^https?://", toString( raw ) ) ) {
+                    throw( type = "CustomFieldService.InvalidValue", message = "[#arguments.field.getName()#] must start with http:// or https://." );
+                }
+                return toString( raw );
+            case "dropdown":
+                var allowed = decodeOptions( arguments.field.getOptionsJson() ?: "" );
+                if ( !arrayContains( allowed, toString( raw ) ) ) {
+                    throw( type = "CustomFieldService.InvalidValue", message = "[#arguments.field.getName()#] must be one of: " & arrayToList( allowed, ", " ) );
+                }
+                return toString( raw );
+            case "multiselect":
+                var allowedM = decodeOptions( arguments.field.getOptionsJson() ?: "" );
+                var picks    = isArray( raw ) ? raw : listToArray( toString( raw ), "," );
+                var clean    = [];
+                for ( var p in picks ) {
+                    var v = trim( toString( p ) );
+                    if ( !len( v ) ) continue;
+                    if ( !arrayContains( allowedM, v ) ) {
+                        throw( type = "CustomFieldService.InvalidValue", message = "[#v#] is not a valid choice for [#arguments.field.getName()#]." );
+                    }
+                    if ( !arrayContains( clean, v ) ) clean.append( v );
+                }
+                if ( !arrayLen( clean ) ) return "";
+                return jsonSerialize( clean );
+        }
+        return toString( raw );
+    }
+
+    /**
+     * Public helper for templates: parse the stored options_json
+     * back into an array of strings. Returns [] when empty.
+     */
+    public array function decodeOptions( required string optionsJson ){
+        if ( !len( arguments.optionsJson ) ) return [];
+        try {
+            var parsed = jsonDeserialize( arguments.optionsJson );
+            return isArray( parsed ) ? parsed : [];
+        } catch ( any e ) {
+            return [];
+        }
+    }
+
+    // ---------- internals ----------
+
+    private boolean function fieldExistsByName( required string projectId, required string name ){
+        var r = queryExecute(
+            "SELECT COUNT(*) AS n FROM pm_custom_fields WHERE project_id = :pid AND lower( name ) = lower( :n )",
+            { pid : arguments.projectId, n : arguments.name }
+        );
+        return r.n[ 1 ] > 0;
+    }
+
+    /**
+     * Accept the options input as a string ("one per line"), a comma-
+     * separated string, or an array. Persist as a JSON array of
+     * trimmed unique strings. Empty input returns "".
+     */
+    private string function normalizeOptionsForStorage( required string fieldType, any rawOptions = "" ){
+        if ( arguments.fieldType != "dropdown" && arguments.fieldType != "multiselect" ) return "";
+
+        var raw = arguments.rawOptions ?: "";
+        var list = [];
+        if ( isArray( raw ) ) {
+            list = raw;
+        } else if ( isSimpleValue( raw ) && len( raw ) ) {
+            // newline OR comma delimited.
+            list = listToArray( raw, char( 10 ) & char( 13 ) & "," );
+        }
+        var clean = [];
+        for ( var item in list ) {
+            var v = trim( toString( item ) );
+            if ( !len( v ) || arrayContains( clean, v ) ) continue;
+            clean.append( v );
+        }
+        return arrayLen( clean ) ? jsonSerialize( clean ) : "";
+    }
+
+    /**
+     * Decode the stored TEXT value into the shape the wire layer
+     * wants to render. Multiselect rehydrates to an array; checkbox
+     * to a boolean; everything else passes through as a string.
+     * Field-aware decoding is the caller's responsibility when type
+     * matters (this helper does best-effort).
+     */
+    private any function decodeValueForRead( required string stored ){
+        if ( !len( arguments.stored ) ) return "";
+        // JSON-array shape (multiselect)? Cheap sniff.
+        if ( left( arguments.stored, 1 ) == "[" ) {
+            try { return jsonDeserialize( arguments.stored ); }
+            catch ( any e ) { /* fall through */ }
+        }
+        if ( arguments.stored == "true"  ) return true;
+        if ( arguments.stored == "false" ) return false;
+        return arguments.stored;
+    }
+
+}

@@ -1,0 +1,206 @@
+/**
+ * CustomFieldServiceSpec: definitions CRUD, per-type validation,
+ * value upsert + read-back.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "CustomFieldService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.subtaskSvc = variables.wb.getInstance( "SubtaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "CustomFieldService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                sleep( 200 );
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createField writes a row scoped to the project", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    name           : "Severity",
+                    fieldType      : "dropdown",
+                    options        : "Low,Medium,High",
+                    isRequired     : true,
+                    appliesTo      : "task"
+                } );
+                expect( f.getName() ).toBe( "Severity" );
+                expect( f.getAppliesTo() ).toBe( "task" );
+                expect( !!f.getIsRequired() ).toBeTrue();
+                expect( variables.svc.decodeOptions( f.getOptionsJson() ) ).toBe( [ "Low", "Medium", "High" ] );
+            } );
+
+            it( "rejects an invalid field type", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createField( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        name           : "x",
+                        fieldType      : "blob"
+                    } );
+                } ).toThrow( type = "CustomFieldService.InvalidType" );
+            } );
+
+            it( "rejects a duplicate name (case insensitive) within the same project", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Owner", fieldType : "text" } );
+                expect( function(){
+                    variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "owner", fieldType : "text" } );
+                } ).toThrow( type = "CustomFieldService.DuplicateName" );
+            } );
+
+            it( "listApplicableForValuable union of 'both' + the matching type", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f1 = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Notes",     fieldType : "text", appliesTo : "task"    } );
+                var f2 = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Checklist", fieldType : "text", appliesTo : "subtask" } );
+                var f3 = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Tag",       fieldType : "text", appliesTo : "both"    } );
+
+                var taskFields = variables.svc.listApplicableForValuable( ctx.project.getId(), "task" );
+                var taskNames  = taskFields.map( ( x ) => x.getName() );
+                expect( taskNames ).toInclude( "Notes" );
+                expect( taskNames ).toInclude( "Tag" );
+                expect( taskNames ).notToInclude( "Checklist" );
+
+                var subFields = variables.svc.listApplicableForValuable( ctx.project.getId(), "subtask" );
+                var subNames  = subFields.map( ( x ) => x.getName() );
+                expect( subNames ).toInclude( "Checklist" );
+                expect( subNames ).toInclude( "Tag" );
+                expect( subNames ).notToInclude( "Notes" );
+            } );
+
+            it( "setValue + getValue + valuesForValuable round-trip for each type", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var fText     = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Owner",    fieldType : "text"     } );
+                var fNumber   = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Estimate", fieldType : "number"   } );
+                var fDate     = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Ship by",  fieldType : "date"     } );
+                var fCheck    = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Approved", fieldType : "checkbox" } );
+                var fUrl      = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Spec",     fieldType : "url"      } );
+                var fDrop     = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Tier",     fieldType : "dropdown",    options : "A,B" } );
+                var fMulti    = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Audience", fieldType : "multiselect", options : "Dev,Ops,QA" } );
+
+                variables.svc.setValue( customFieldId : fText.getId(),   valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "Alice" );
+                variables.svc.setValue( customFieldId : fNumber.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : 7.5 );
+                variables.svc.setValue( customFieldId : fDate.getId(),   valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "2026-09-01" );
+                variables.svc.setValue( customFieldId : fCheck.getId(),  valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : true );
+                variables.svc.setValue( customFieldId : fUrl.getId(),    valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "https://example.com/spec" );
+                variables.svc.setValue( customFieldId : fDrop.getId(),   valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "B" );
+                variables.svc.setValue( customFieldId : fMulti.getId(),  valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : [ "Dev", "QA" ] );
+
+                var bag = variables.svc.valuesForValuable( "task", ctx.task.getId() );
+                expect( bag[ fText.getId()   ] ).toBe( "Alice" );
+                expect( bag[ fNumber.getId() ] ).toBe( "7.5" );
+                expect( bag[ fDate.getId()   ] ).toBe( "2026-09-01" );
+                expect( bag[ fCheck.getId()  ] ).toBe( true );
+                expect( bag[ fUrl.getId()    ] ).toBe( "https://example.com/spec" );
+                expect( bag[ fDrop.getId()   ] ).toBe( "B" );
+                expect( bag[ fMulti.getId()  ] ).toBe( [ "Dev", "QA" ] );
+            } );
+
+            it( "required field throws on empty value", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "MustHave", fieldType : "text", isRequired : true } );
+                expect( function(){
+                    variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "" );
+                } ).toThrow( type = "CustomFieldService.RequiredField" );
+            } );
+
+            it( "number type rejects non-numeric strings", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Estimate", fieldType : "number" } );
+                expect( function(){
+                    variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "twelve" );
+                } ).toThrow( type = "CustomFieldService.InvalidValue" );
+            } );
+
+            it( "dropdown rejects values outside the options set", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Tier", fieldType : "dropdown", options : "A,B" } );
+                expect( function(){
+                    variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "C" );
+                } ).toThrow( type = "CustomFieldService.InvalidValue" );
+            } );
+
+            it( "url type rejects an unscheme'd value", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Spec", fieldType : "url" } );
+                expect( function(){
+                    variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "example.com" );
+                } ).toThrow( type = "CustomFieldService.InvalidValue" );
+            } );
+
+            it( "setValue with empty input clears an existing optional value", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Owner", fieldType : "text" } );
+                variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "Alice" );
+                expect( variables.svc.valuesForValuable( "task", ctx.task.getId() )[ f.getId() ] ).toBe( "Alice" );
+                variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "" );
+                expect( structKeyExists( variables.svc.valuesForValuable( "task", ctx.task.getId() ), f.getId() ) ).toBeFalse();
+            } );
+
+            it( "setValue upsert: second write updates rather than duplicates", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Owner", fieldType : "text" } );
+                variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "Alice" );
+                variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "Bob"  );
+                var rows = queryExecute(
+                    "SELECT COUNT(*) AS n FROM pm_custom_field_values WHERE custom_field_id = :cfid AND valuable_id = :vid",
+                    { cfid : f.getId(), vid : ctx.task.getId() }
+                );
+                expect( rows.n[ 1 ] ).toBe( 1 );
+                expect( variables.svc.valuesForValuable( "task", ctx.task.getId() )[ f.getId() ] ).toBe( "Bob" );
+            } );
+
+            it( "removeField cascades the values away", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "Owner", fieldType : "text" } );
+                variables.svc.setValue( customFieldId : f.getId(), valuableType : "task", valuableId : ctx.task.getId(), organizationId : ctx.orgId, value : "Alice" );
+                variables.svc.removeField( f.getId() );
+                var rows = queryExecute(
+                    "SELECT COUNT(*) AS n FROM pm_custom_field_values WHERE custom_field_id = :cfid",
+                    { cfid : f.getId() }
+                );
+                expect( rows.n[ 1 ] ).toBe( 0 );
+            } );
+
+            it( "subtask values work the same way (polymorphic over valuable_type)", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var sub = variables.subtaskSvc.createSubtask( { taskId : ctx.task.getId(), organizationId : ctx.orgId, title : "cf-sub" } );
+                var f = variables.svc.createField( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "SubLabel", fieldType : "text", appliesTo : "subtask" } );
+                variables.svc.setValue( customFieldId : f.getId(), valuableType : "subtask", valuableId : sub.getId(), organizationId : ctx.orgId, value : "ready" );
+                expect( variables.svc.valuesForValuable( "subtask", sub.getId() )[ f.getId() ] ).toBe( "ready" );
+                // Task should still have no value for this field.
+                expect( structKeyExists( variables.svc.valuesForValuable( "task", ctx.task.getId() ), f.getId() ) ).toBeFalse();
+            } );
+
+        } );
+    }
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "cf-" & createUUID(), slug : "cf-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "cf-" & createUUID() } );
+        var task    = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "cf-task" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}

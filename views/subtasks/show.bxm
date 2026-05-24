@@ -70,6 +70,18 @@
             <bx:if !isNull( local.project )>
                 <div class="mt-3">
                     #wire(
+                        name   = "CustomFieldsForm@tesserabx-pm",
+                        params = {
+                            valuableType   : "subtask",
+                            valuableId     : local.s.getId(),
+                            projectId      : local.project.getId(),
+                            organizationId : local.s.getOrganizationId()
+                        }
+                    )#
+                </div>
+
+                <div class="mt-3">
+                    #wire(
                         name   = "TimeLogger@tesserabx-pm",
                         params = {
                             loggableType   : "subtask",

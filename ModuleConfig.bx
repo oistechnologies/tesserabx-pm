@@ -403,6 +403,9 @@ class {
         binder.map( "LabelService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.LabelService" )
               .asSingleton();
+        binder.map( "CustomFieldService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.CustomFieldService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -425,6 +428,12 @@ class {
               .asSingleton();
         binder.map( "LabelDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.LabelDto" )
+              .asSingleton();
+        binder.map( "CustomFieldDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.CustomFieldDto" )
+              .asSingleton();
+        binder.map( "CustomFieldValueDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.CustomFieldValueDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

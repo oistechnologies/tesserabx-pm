@@ -1,0 +1,129 @@
+<bx:output>
+<bx:script>
+    local.fields = fields();
+    local.types  = fieldTypes();
+    local.needsOptionsNew  = data.newFieldType    eq "dropdown" or data.newFieldType    eq "multiselect";
+</bx:script>
+
+<div class="card" data-pm-wire-id="#_getID()#">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0">Custom fields <span class="badge text-bg-secondary">#arrayLen( local.fields )#</span></h2>
+        </div>
+
+        <bx:if len( notice )>
+            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+                <span>#encodeForHTML( notice )#</span>
+                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+            </div>
+        </bx:if>
+
+        <form wire:submit.prevent="add" class="border rounded p-3 mb-3 bg-light-subtle">
+            <h3 class="h6 mb-2">New field</h3>
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <label class="form-label small mb-0" for="cf-name">Name</label>
+                    <input id="cf-name" type="text" class="form-control form-control-sm" wire:model="newName" maxlength="100">
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-0" for="cf-type">Type</label>
+                    <select id="cf-type" class="form-select form-select-sm" wire:model.live="newFieldType">
+                        <bx:loop array="#local.types#" item="t">
+                            <option value="#encodeForHTMLAttribute( t )#">#encodeForHTML( t )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-0" for="cf-applies">Applies to</label>
+                    <select id="cf-applies" class="form-select form-select-sm" wire:model="newAppliesTo">
+                        <option value="both">tasks + subtasks</option>
+                        <option value="task">tasks only</option>
+                        <option value="subtask">subtasks only</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2 d-flex align-items-end">
+                    <div class="form-check form-switch w-100">
+                        <input id="cf-req" type="checkbox" class="form-check-input" wire:model="newIsRequired">
+                        <label class="form-check-label small" for="cf-req">Required</label>
+                    </div>
+                </div>
+                <bx:if local.needsOptionsNew>
+                    <div class="col-12">
+                        <label class="form-label small mb-0" for="cf-opts">Options (one per line)</label>
+                        <textarea id="cf-opts" class="form-control form-control-sm" rows="3" wire:model="newOptions" placeholder="Low&##10;Medium&##10;High"></textarea>
+                    </div>
+                </bx:if>
+                <div class="col-12 text-end">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Add field</button>
+                </div>
+            </div>
+        </form>
+
+        <bx:if !arrayLen( local.fields )>
+            <p class="text-body-secondary small fst-italic mb-0">No custom fields defined for this project yet.</p>
+        <bx:else>
+            <ul class="list-unstyled mb-0">
+                <bx:loop array="#local.fields#" item="f">
+                    <li class="border-top pt-2 pb-2">
+                        <bx:if data.editingId eq f.getId()>
+                            <bx:set local.editNeedsOptions = f.getFieldType() eq "dropdown" or f.getFieldType() eq "multiselect" >
+                            <div class="row g-2">
+                                <div class="col-12 col-md-4">
+                                    <input type="text" class="form-control form-control-sm" wire:model="editName" placeholder="Name">
+                                </div>
+                                <div class="col-12 col-md-3">
+                                    <select class="form-select form-select-sm" wire:model="editAppliesTo">
+                                        <option value="both">tasks + subtasks</option>
+                                        <option value="task">tasks only</option>
+                                        <option value="subtask">subtasks only</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-2 d-flex align-items-center">
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" wire:model="editIsRequired" id="cf-edit-req-#encodeForHTMLAttribute( f.getId() )#">
+                                        <label class="form-check-label small" for="cf-edit-req-#encodeForHTMLAttribute( f.getId() )#">Required</label>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3 d-flex gap-1 justify-content-end">
+                                    <button class="btn btn-sm btn-primary" wire:click="saveEdit()"><i class="bi bi-check-lg"></i></button>
+                                    <button class="btn btn-sm btn-outline-secondary" wire:click="cancelEdit()"><i class="bi bi-x-lg"></i></button>
+                                </div>
+                                <bx:if local.editNeedsOptions>
+                                    <div class="col-12">
+                                        <label class="form-label small mb-0">Options (one per line)</label>
+                                        <textarea class="form-control form-control-sm" rows="3" wire:model="editOptions"></textarea>
+                                    </div>
+                                </bx:if>
+                                <div class="col-12 small text-body-secondary">
+                                    Type <code>#encodeForHTML( f.getFieldType() )#</code> is fixed after create. Delete and recreate the field to change the type.
+                                </div>
+                            </div>
+                        <bx:else>
+                            <div class="d-flex justify-content-between align-items-center gap-2">
+                                <div>
+                                    <strong>#encodeForHTML( f.getName() )#</strong>
+                                    <span class="badge text-bg-light border ms-2">#encodeForHTML( f.getFieldType() )#</span>
+                                    <span class="badge text-bg-light border ms-1">#encodeForHTML( f.getAppliesTo() )#</span>
+                                    <bx:if !!f.getIsRequired()>
+                                        <span class="badge text-bg-warning ms-1">required</span>
+                                    </bx:if>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( f.getId() )#')" title="Edit"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( f.getId() )#')" wire:confirm="Delete this field? All stored values for it will be removed." title="Delete"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </div>
+                            <bx:set local.opts = optionsFor( f ) >
+                            <bx:if arrayLen( local.opts )>
+                                <div class="small text-body-secondary mt-1">
+                                    Options: #encodeForHTML( arrayToList( local.opts, ", " ) )#
+                                </div>
+                            </bx:if>
+                        </bx:if>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

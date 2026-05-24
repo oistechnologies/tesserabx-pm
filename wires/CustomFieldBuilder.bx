@@ -1,0 +1,129 @@
+/**
+ * CustomFieldBuilder: per-project custom field admin UI.
+ *
+ * Mounted from views/customFields/index.bxm at
+ * /agent/pm/projects/:projectId/custom-fields.
+ *
+ * Add / edit applies_to + required + sort_order inline. field_type
+ * is immutable after create (changing it would silently invalidate
+ * stored values); delete-and-recreate is the migration path.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="cfService" inject="CustomFieldService@tesserabx-pm";
+
+    data = {
+        "projectId"        : "",
+        "organizationId"   : "",
+        "newName"          : "",
+        "newFieldType"     : "text",
+        "newAppliesTo"     : "both",
+        "newIsRequired"    : false,
+        "newOptions"       : "",
+        "editingId"        : "",
+        "editName"         : "",
+        "editAppliesTo"    : "both",
+        "editIsRequired"   : false,
+        "editOptions"      : "",
+        "notice"           : "",
+        "noticeKind"       : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.projectId      = arguments.params.projectId      ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+    }
+
+    function fields(){
+        if ( !len( data.projectId ) ) return [];
+        return cfService.listForProject( data.projectId );
+    }
+
+    function fieldTypes(){
+        return [ "text", "number", "date", "dropdown", "multiselect", "checkbox", "url" ];
+    }
+
+    /**
+     * Template helper. The bxm cannot reach the injected
+     * `cfService` directly because CBWire only exposes component
+     * methods (not raw DI properties) into template scope.
+     */
+    function optionsFor( required any field ){
+        return cfService.decodeOptions( arguments.field.getOptionsJson() ?: "" );
+    }
+
+    function add(){
+        var name = trim( data.newName ?: "" );
+        if ( !len( name ) ) {
+            notice( "Enter a field name.", "warning" );
+            return;
+        }
+        try {
+            cfService.createField( {
+                projectId      : data.projectId,
+                organizationId : data.organizationId,
+                name           : name,
+                fieldType      : data.newFieldType,
+                appliesTo      : data.newAppliesTo,
+                isRequired     : !!data.newIsRequired,
+                options        : data.newOptions
+            } );
+            data.newName       = "";
+            data.newOptions    = "";
+            data.newIsRequired = false;
+            notice( "Field added.", "success" );
+        } catch ( any e ) {
+            notice( "Could not add field: " & e.message, "danger" );
+        }
+    }
+
+    function startEdit( id ){
+        var f = cfService.getField( arguments.id ?: "" );
+        if ( isNull( f ) ) return;
+        data.editingId      = f.getId();
+        data.editName       = f.getName();
+        data.editAppliesTo  = f.getAppliesTo();
+        data.editIsRequired = !!f.getIsRequired();
+        var opts = cfService.decodeOptions( f.getOptionsJson() ?: "" );
+        data.editOptions    = arrayToList( opts, char( 10 ) );
+    }
+
+    function cancelEdit(){
+        data.editingId      = "";
+        data.editName       = "";
+        data.editAppliesTo  = "both";
+        data.editIsRequired = false;
+        data.editOptions    = "";
+    }
+
+    function saveEdit(){
+        if ( !len( data.editingId ?: "" ) ) return;
+        try {
+            cfService.updateField( data.editingId, {
+                name       : trim( data.editName ?: "" ),
+                appliesTo  : data.editAppliesTo,
+                isRequired : !!data.editIsRequired,
+                options    : data.editOptions
+            } );
+            cancelEdit();
+            notice( "Field updated.", "success" );
+        } catch ( any e ) {
+            notice( "Could not update field: " & e.message, "danger" );
+        }
+    }
+
+    function remove( id ){
+        try {
+            cfService.removeField( arguments.id ?: "" );
+            notice( "Field removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove field: " & e.message, "danger" );
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

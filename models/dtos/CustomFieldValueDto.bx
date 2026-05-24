@@ -1,0 +1,28 @@
+/**
+ * CustomFieldValueDto: snake-case shape for pm_custom_field_values
+ * rows. The raw `value` column passes through unchanged; callers that
+ * need it decoded (multiselect, checkbox) walk via the service's
+ * `valuesForValuable` instead.
+ */
+class singleton=true {
+
+    public struct function fromValue( required any v ){
+        return {
+            id              : arguments.v.getId(),
+            custom_field_id : arguments.v.getCustomFieldId(),
+            organization_id : arguments.v.getOrganizationId(),
+            valuable_type   : arguments.v.getValuableType(),
+            valuable_id     : arguments.v.getValuableId(),
+            value           : arguments.v.getValue() ?: "",
+            created_at      : isDate( arguments.v.getCreatedAt() ) ? dateTimeFormat( arguments.v.getCreatedAt(), "iso" ) : "",
+            updated_at      : isDate( arguments.v.getUpdatedAt() ) ? dateTimeFormat( arguments.v.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromValueArray( required array values ){
+        var out = [];
+        for ( var v in arguments.values ) out.append( fromValue( v ) );
+        return out;
+    }
+
+}

@@ -1,0 +1,23 @@
+<bx:output>
+<bx:set local.p = prc.project >
+
+<div class="container-fluid">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+            <li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.p.getId() )#" class="link-secondary">#encodeForHTML( local.p.getName() )#</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Custom fields</li>
+        </ol>
+    </nav>
+
+    <h1 class="mb-3 fs-3">Custom fields</h1>
+
+    #wire(
+        name   = "CustomFieldBuilder@tesserabx-pm",
+        params = {
+            projectId      : local.p.getId(),
+            organizationId : local.p.getOrganizationId()
+        }
+    )#
+</div>
+</bx:output>

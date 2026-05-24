@@ -68,6 +68,18 @@
 
 			<div class="mt-3">
 				#wire(
+					name   = "CustomFieldsForm@tesserabx-pm",
+					params = {
+						valuableType   : "task",
+						valuableId     : local.t.getId(),
+						projectId      : local.project.getId(),
+						organizationId : local.t.getOrganizationId()
+					}
+				)#
+			</div>
+
+			<div class="mt-3">
+				#wire(
 					name   = "TimeLogger@tesserabx-pm",
 					params = {
 						loggableType   : "task",

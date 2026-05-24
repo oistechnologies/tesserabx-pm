@@ -1,0 +1,28 @@
+/**
+ * Agent-surface CustomFields handler. Single action mounts the
+ * CustomFieldBuilder CBWire scoped to a project.
+ *
+ * Route: /agent/pm/projects/:projectId/custom-fields
+ */
+class {
+
+    property name="projectService" inject="ProjectService@tesserabx-pm";
+    property name="messagebox"     inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = "Custom fields — " & project.getName();
+        prc.project   = project;
+        event.setView( view = "customFields/index", module = "tesserabx-pm" );
+    }
+
+}

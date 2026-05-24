@@ -1,0 +1,38 @@
+/**
+ * CustomFieldDto: snake-case shape for pm_custom_fields rows on the
+ * wire. `options` is parsed back into an array of strings (or [] for
+ * non-choice types) so consumers do not need to JSON-decode.
+ */
+class singleton=true {
+
+    public struct function fromField( required any f ){
+        var options = [];
+        var raw = arguments.f.getOptionsJson() ?: "";
+        if ( len( raw ) ) {
+            try {
+                var parsed = jsonDeserialize( raw );
+                if ( isArray( parsed ) ) options = parsed;
+            } catch ( any e ) {}
+        }
+        return {
+            id              : arguments.f.getId(),
+            project_id      : arguments.f.getProjectId(),
+            organization_id : arguments.f.getOrganizationId(),
+            name            : arguments.f.getName(),
+            field_type      : arguments.f.getFieldType(),
+            options         : options,
+            is_required     : !!arguments.f.getIsRequired(),
+            applies_to      : arguments.f.getAppliesTo(),
+            sort_order      : int( val( arguments.f.getSortOrder() ?: 0 ) ),
+            created_at      : isDate( arguments.f.getCreatedAt() ) ? dateTimeFormat( arguments.f.getCreatedAt(), "iso" ) : "",
+            updated_at      : isDate( arguments.f.getUpdatedAt() ) ? dateTimeFormat( arguments.f.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromFieldArray( required array fields ){
+        var out = [];
+        for ( var f in arguments.fields ) out.append( fromField( f ) );
+        return out;
+    }
+
+}

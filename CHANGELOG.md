@@ -6,6 +6,27 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 6b: Per-Project Custom Fields
+
+- `CustomFieldService@tesserabx-pm` ships per-project custom field definitions plus polymorphic value storage over Task / Subtask. Seven field types per BUILD-PLAN §6: `text`, `number`, `date`, `dropdown`, `multiselect`, `checkbox`, `url`. `field_type` is intentionally immutable after create (changing it would silently invalidate stored values; delete-and-recreate is the migration path); name, applies_to, required flag, sort order, and options are mutable.
+- Per-type `validateAndSerialize(field, rawValue)` enforces the BUILD-PLAN validation matrix:
+  - `text` — passes through as-is.
+  - `number` — `isNumeric` guard, stored as a decimal string.
+  - `date` — `isDate` guard, normalised to ISO `yyyy-mm-dd`.
+  - `checkbox` — coerced to `"true"`/`"false"`.
+  - `url` — must start with `http://` or `https://`.
+  - `dropdown` — value must be in the field's `options_json` set.
+  - `multiselect` — every chosen value must be in `options_json`; stored as a JSON-encoded array of distinct values.
+  - Required check fires across every type: an empty value on a required field throws `CustomFieldService.RequiredField`.
+- Value storage uses `INSERT ... ON CONFLICT (custom_field_id, valuable_type, valuable_id) DO UPDATE` so `setValue` is idempotent and never produces duplicate rows; `setValue` with an empty value on an optional field clears the row instead. `valuesForValuable(valuableType, valuableId)` returns a decoded map keyed by `custom_field_id` (multiselect → array, checkbox → boolean, everything else → string).
+- New CBWires:
+  - `CustomFieldBuilder@tesserabx-pm` at `/agent/pm/projects/:projectId/custom-fields`. Inline add (name, type, applies_to, required, options-as-textarea for dropdown/multiselect), edit, delete. Type is locked in the edit view with a note about the migration path.
+  - `CustomFieldsForm@tesserabx-pm` embedded on the task and subtask detail pages. Loads applicable fields via `listApplicableForValuable` (union of `applies_to = "both"` and the matching valuable type). Renders one input per field, type-appropriate: native `<input type=text|number|date|url>`, `<select>` for dropdown, button-row toggle for multiselect, switch for checkbox. Single "Save fields" button persists every value through the service's validator so required + format errors surface at the wire level.
+- New handler + view + route: `handlers/CustomFields.bx`, `views/customFields/index.bxm`, and `route("projects/:projectId/custom-fields").to("CustomFields.index")` in `config/Router.bx`. Project show page gains a "Manage custom fields" entry-point card alongside the labels card.
+- New DTOs: `CustomFieldDto@tesserabx-pm` (parses `options_json` back into an array of strings) and `CustomFieldValueDto@tesserabx-pm` (raw value passthrough). New contract: `ICustomFieldService@tesserabx-pm`.
+- New test bundle `CustomFieldServiceSpec` (13 specs covering create, type validation, duplicate-name reject, applies_to filter, every type's value round-trip, required throw, number/dropdown/url format throws, optional clear, upsert no-dup, cascade on field delete, subtask polymorphism). `InstallSpec` adds 3 new probes (CustomFieldService binding, CustomFieldDto binding, CustomFieldValueDto binding). 46 specs total in InstallSpec.
+- Deferred to Phase 10 (List / Calendar views): board-level filtering by custom field value. The schema and service already support it; the kanban UI just needs the picker, which is meaningfully more complex than the label chip-row and was de-scoped to keep Phase 6b focused on definitions + value capture.
+
 ### Phase 6a: Labels
 
 - `LabelService@tesserabx-pm` ships per-project label CRUD plus task attach/detach. `pm_labels(project_id, name)` is unique so the same name can repeat across projects but never within one. Hard delete on `removeLabel` (no soft-delete column on `pm_labels`); the `pm_task_labels` FK cascade removes attached joins. `attachToTask` uses `INSERT ... ON CONFLICT DO NOTHING` for idempotency; `syncTaskLabels(taskId, labelIds)` reconciles attach + detach in a single call so the picker can save a multi-select with one wire action.

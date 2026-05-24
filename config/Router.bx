@@ -44,7 +44,8 @@ class {
         } );
         route( "projects/:projectId/tasks/quick-add" ).withVerbs( "POST" ).to( "Tasks.quickAdd" );
         route( "projects/:projectId/tasks" ).to( "Tasks.index" );
-        route( "projects/:projectId/labels" ).to( "Labels.index" );
+        route( "projects/:projectId/labels"        ).to( "Labels.index" );
+        route( "projects/:projectId/custom-fields" ).to( "CustomFields.index" );
 
         route( "projects/:id" ).withHandler( "Projects" ).toAction( {
             "GET"  : "show",
