@@ -1,0 +1,105 @@
+/**
+ * tesserabx-pm: Project Management for TesseraBX.
+ *
+ * A third-party TesseraBX add-on. Installs as a standard ColdBox 8
+ * BoxLang module at modules/tesserabx-pm/ and participates in the
+ * host's settings.tesserabx manifest contract documented in the host
+ * repo at docs/EXTENSIONS.md.
+ *
+ * Phase 0 scaffold. The settings.tesserabx block carries the
+ * foundation (addonId, displayName, version, version range,
+ * requiresAi) and a placeholder for every registry contribution
+ * PM will populate as phases land. Empty arrays are intentional;
+ * the host's AddonRegistryService accepts them and a phase-by-phase
+ * InstallSpec catches any registry that should have grown but did
+ * not.
+ *
+ * Full build plan: docs/BUILD-PLAN.md.
+ */
+class {
+
+    this.title              = "Project Management";
+    this.author             = "OIS Technologies";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx-pm";
+    this.description        = "Project Management add-on for the TesseraBX helpdesk platform.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "tesserabx-pm";
+    this.modelNamespace     = "tesserabx-pm";
+    this.cfmapping          = "tesserabx.modules.tesserabx-pm";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "core", "contacts", "audit", "notifications", "ai", "api", "help" ];
+
+    function configure(){
+        variables.settings = {
+            tesserabx : {
+                // Foundation. minCoreVersion matches the host's
+                // current appVersion (0.0.1); maxCoreVersion is
+                // omitted so any host >= 0.0.1 accepts PM.
+                addonId        : "tesserabx-pm",
+                displayName    : "Project Management",
+                version        : "0.0.1",
+                minCoreVersion : "0.0.1",
+                contributesTo  : [],
+                requiresAi     : false,
+
+                // Registry contributions. Every array is intentionally
+                // empty at Phase 0. Each subsequent phase fills the
+                // arrays it owns and adds matching probes to the
+                // InstallSpec. The set of keys here mirrors the host
+                // EXTENSIONS.md registry catalog; missing keys are
+                // treated as empty by AddonRegistryService.
+
+                // Phase 1: permissions, roles, navigation, admin
+                // landing card, per-tenant settings.
+                permissions             : [],
+                roles                   : [],
+                navigation              : [],
+                adminPages              : [],
+                settings                : [],
+
+                // Phase 2 onward: API surface.
+                apiResources            : [],
+
+                // Phase 4: audit event types, project event timeline,
+                // and the canonical event envelopes PM announces.
+                auditEvents             : [],
+                webhookEvents           : [],
+
+                // Phase 8: bidirectional ticket integration.
+                ticketPanels            : [],
+                automationActions       : [],
+                automationTriggers      : [],
+
+                // Phase 9: notification delivery (PM emits events
+                // that the host notifications module consumes; PM
+                // declares the templates).
+                notificationTemplates   : [],
+
+                // Phases 3, 5, 12: dashboard widgets and AI features.
+                dashboardWidgets        : [],
+                aiFeatures              : [],
+                embeddingConsumers      : [],
+
+                // Per-phase: help content, static assets.
+                helpSections            : [],
+                helpPages               : [],
+                assets                  : []
+            }
+        };
+
+        variables.routes              = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors        = [];
+    }
+
+    function onLoad(){
+        // WireBox mappings are added as services arrive in later
+        // phases. Phase 0 ships only the placeholder handler, which
+        // ColdBox resolves automatically.
+    }
+
+    function onUnload(){}
+
+}

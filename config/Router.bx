@@ -1,0 +1,22 @@
+/**
+ * tesserabx-pm module router.
+ *
+ * Routes live under PM's own entryPoint (/tesserabx-pm/*) per the
+ * host's add-on convention. The reference add-on (sample-addons/
+ * example-sync) documents why: cross-module routing from a module
+ * router is brittle in this ColdBox version, so add-on routes are
+ * mounted under the add-on's own URL prefix.
+ *
+ * Phase 0 ships a single placeholder route. Phases 2 onward expand
+ * the surface (projects, tasks, board, API, admin).
+ *
+ * URLs (all under /tesserabx-pm/):
+ *   GET /                                -> Main.index   "PM installed" page
+ */
+class {
+
+    function configure(){
+        route( "/" ).withVerbs( "GET" ).to( "Main.index" );
+    }
+
+}
