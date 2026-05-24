@@ -182,6 +182,12 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.wb.getInstance( "SubtaskDto@tesserabx-pm" ) ).notToBeNull();
             } );
 
+            // ---- Phase 3a: kanban board service wiring.
+
+            it( "binds BoardService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "BoardService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
             // ---- Phase 2c: REST API surface.
 
             it( "claims every /api/v1/pm/* endpoint in RouteClaimsRegistry@core", function(){

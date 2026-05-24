@@ -274,6 +274,9 @@ class {
         binder.map( "ProjectStatusService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.ProjectStatusService" )
               .asSingleton();
+        binder.map( "BoardService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.BoardService" )
+              .asSingleton();
         binder.map( "TaskService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.TaskService" )
               .asSingleton();

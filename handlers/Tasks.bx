@@ -24,6 +24,7 @@ class {
     property name="subtaskService"       inject="SubtaskService@tesserabx-pm";
     property name="projectService"       inject="ProjectService@tesserabx-pm";
     property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="boardService"         inject="BoardService@tesserabx-pm";
     property name="contactsService"      inject="ContactsService@contacts";
     property name="messagebox"           inject="messagebox@cbmessagebox";
     property name="auth"                 inject="AuthenticationService@cbauth";
@@ -53,23 +54,16 @@ class {
 
         prc.pageTitle = project.getName() & " — Tasks";
         prc.project   = project;
-        prc.statuses  = projectStatusService.listForProject( project.getId() );
-        prc.filters   = {
-            statusId     : rc.statusId,
-            assigneeType : rc.assigneeType,
-            assigneeId   : rc.assigneeId,
-            priority     : rc.priority,
-            q            : rc.q
-        };
-        prc.tasks = taskService.listForProject(
-            projectId    = project.getId(),
-            statusId     = rc.statusId,
-            assigneeType = rc.assigneeType,
-            assigneeId   = rc.assigneeId,
-            priority     = rc.priority,
-            search       = rc.q
+        prc.board     = boardService.buildBoard(
+            projectId = project.getId(),
+            filters   = {
+                statusId     : rc.statusId,
+                assigneeType : rc.assigneeType,
+                assigneeId   : rc.assigneeId,
+                priority     : rc.priority,
+                search       : rc.q
+            }
         );
-        prc.tasksByStatus = groupTasksByStatus( prc.tasks, prc.statuses );
 
         event.setView( view = "tasks/index", module = "tesserabx-pm" );
     }
@@ -118,6 +112,43 @@ class {
         prc.formData   = formDataDefaults( rc );
         prc.formErrors = prc.formErrors ?: [];
         event.setView( view = "tasks/new", module = "tesserabx-pm" );
+    }
+
+    /**
+     * Quick-add from the kanban board. Single-field form (title)
+     * posted from the bottom of a column; statusId comes through
+     * as a hidden input so the new task lands in the right
+     * column. Empty titles are ignored (the form silently submits
+     * when an agent hits Enter on an empty input). Server bounces
+     * back to the board on success or failure.
+     */
+    function quickAdd( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var title = trim( rc.title ?: "" );
+        if ( !len( title ) ) {
+            relocate( uri = "/agent/pm/projects/" & project.getId() & "/tasks" );
+            return;
+        }
+
+        try {
+            taskService.createTask( {
+                projectId      : project.getId(),
+                organizationId : project.getOrganizationId(),
+                title          : title,
+                statusId       : rc.statusId ?: "",
+                actorType      : prc.viewer.accountType ?: "agent",
+                actorId        : prc.viewer.accountId   ?: ""
+            } );
+        } catch ( any e ) {
+            messagebox.error( "Could not add task: " & e.message );
+        }
+        relocate( uri = "/agent/pm/projects/" & project.getId() & "/tasks" );
     }
 
     function create( event, rc, prc ){
@@ -282,24 +313,6 @@ class {
             isClientVisible : !!arguments.task.getIsClientVisible(),
             sortOrder       : int( val( arguments.task.getSortOrder() ?: 0 ) )
         };
-    }
-
-    private struct function groupTasksByStatus( required array tasks, required array statuses ){
-        var byStatus = {};
-        for ( var s in arguments.statuses ) {
-            byStatus[ s.getId() ] = { status : s, items : [] };
-        }
-        // Bucket for tasks without a status row (statusId is null
-        // or refers to a removed row). Keyed by empty string so
-        // the view can render an "(Unassigned)" column.
-        byStatus[ "" ] = { status : "", items : [] };
-
-        for ( var t in arguments.tasks ) {
-            var k = t.getStatusId() ?: "";
-            if ( !structKeyExists( byStatus, k ) ) k = "";
-            byStatus[ k ].items.append( t );
-        }
-        return byStatus;
     }
 
     private boolean function truthy( required any v ){

@@ -42,6 +42,7 @@ class {
             "GET"  : "new",
             "POST" : "create"
         } );
+        route( "projects/:projectId/tasks/quick-add" ).withVerbs( "POST" ).to( "Tasks.quickAdd" );
         route( "projects/:projectId/tasks" ).to( "Tasks.index" );
 
         route( "projects/:id" ).withHandler( "Projects" ).toAction( {

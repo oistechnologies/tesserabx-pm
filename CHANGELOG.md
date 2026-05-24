@@ -6,6 +6,22 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 3a: BoardService and the Kanban View
+
+- `BoardService@tesserabx-pm` owns the kanban grouping pipeline. `buildBoard(projectId, filters)` returns `{ statuses, columns, totalTasks, filters }` where `columns` is a struct keyed by `statusId` (plus an empty-string bucket for tasks whose `status_id` is null or refers to a removed row). `buildColumn(projectId, statusId, filters)` returns just one bucket; the Phase 3b CBWire layer will call this for the per-column re-renders that follow a drag-drop or quick-add.
+- `handlers/Tasks.bx` `index` action now hands off to `BoardService` and populates `prc.board`. The inline `groupTasksByStatus` helper is gone.
+- New action `Tasks.quickAdd` at `POST /agent/pm/projects/:projectId/tasks/quick-add` takes a single `title` field plus the hidden `statusId` from the column form and creates a minimal task, bouncing back to the board.
+- `views/tasks/index.bxm` overhauled:
+  - Filter card: search (matches title), priority, assignee type.
+  - Header summarizes total tasks and column count.
+  - Each column is fixed-width with a horizontal-scroll container, so adding more statuses does not collapse the layout.
+  - Each column has a quick-add input pinned to the footer (Enter submits; empty titles silently no-op).
+  - Task cards show priority badge, assignee chip, due date, client-visible eye, and completed checkmark.
+  - Scoped `.pm-board / .pm-column / .pm-task-card` CSS in a `<style>` block; Phase 3b moves this to a real asset and adds SortableJS.
+- New `tests/specs/unit/BoardServiceSpec.bx`: 6 specs covering column shape (statuses + empty bucket), status bucketing, search/priority filters, normalized filters echo, and `buildColumn` for the single-column re-render.
+- `InstallSpec.bx` gains a `BoardService@tesserabx-pm` WireBox-binding probe. 27 specs total.
+- Deferred to Phase 3b: CBWire components (`KanbanBoard`, `TaskCard`, `TaskDetail` flyout), SortableJS drag-and-drop with `sort_order` + `status_id` persistence, status-column management UI accessible from the board, the per-project ProjectStatus CRUD, the dashboard `pm.recentActivity` widget, and the `assets` manifest entries for `board.js` + `board.css`.
+
 ### Phase 2c: REST API and `pm.assign-client` Enforcement
 
 - Three new API handlers under `handlers/api/v1/`: `Projects.bx`, `Tasks.bx`, `Subtasks.bx`. Each follows the host's `ensureAgent` JWT-guard pattern (mirrors `modules_app/api/handlers/Tickets.bx`): per-action guard reads the bearer via `JwtService@cbsecurity`, returns 401 when missing/invalid, 403 when the token lacks the `agent` role. Every action returns JSON via `event.renderData( type="json", statusCode=..., data=... )` using the existing `ProjectDto`, `TaskDto`, `SubtaskDto` mappers for serialization. Errors raised by the service layer (UnknownProject, InvalidVisibilityScope, InvalidAssignee, etc.) become 400s with a `{ error : "..." }` body; 404 for missing entities; 204 on soft-delete.

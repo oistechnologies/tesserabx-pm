@@ -1,0 +1,142 @@
+/**
+ * BoardServiceSpec: covers the Phase 3a kanban grouping +
+ * filtering pipeline.
+ *
+ * Each spec spins up its own organization + project + tasks
+ * fixture and tears down via the organizations CASCADE.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.statusSvc  = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+        variables.svc        = variables.wb.getInstance( "BoardService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "BoardService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute(
+                        "DELETE FROM organizations WHERE id = :id",
+                        { id : orgId }
+                    );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "buildBoard returns one column per status row plus the empty bucket", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var board = variables.svc.buildBoard( projectId : ctx.project.getId() );
+                expect( arrayLen( board.statuses ) ).toBe( 5, "Standard Workflow seed has 5 statuses." );
+                expect( structKeyExists( board.columns, "" ) ).toBeTrue( "Empty bucket is always present for status-less tasks." );
+                for ( var s in board.statuses ) {
+                    expect( structKeyExists( board.columns, s.getId() ) ).toBeTrue();
+                    expect( board.columns[ s.getId() ].tasks ).toBeArray();
+                }
+            } );
+
+            it( "buildBoard buckets tasks under their status_id", function(){
+                var ctx     = setupProject( fixtureOrgIds );
+                var doneRow = "";
+                for ( var s in variables.statusSvc.listForProject( ctx.project.getId() ) ) {
+                    if ( !!s.getIsCompleted() ) doneRow = s;
+                }
+                var taskBacklog = variables.taskSvc.createTask( {
+                    projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "in backlog"
+                } );
+                var taskDone = variables.taskSvc.createTask( {
+                    projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "is done", statusId : doneRow.getId()
+                } );
+
+                var board   = variables.svc.buildBoard( projectId : ctx.project.getId() );
+                var doneIds = board.columns[ doneRow.getId() ].tasks.map( ( t ) => t.getId() );
+                expect( doneIds ).toInclude( taskDone.getId() );
+                expect( doneIds ).notToInclude( taskBacklog.getId() );
+            } );
+
+            it( "buildBoard search filter narrows tasks across all columns", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "Pay invoice 42" } );
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "Update docs" } );
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "Schedule invoice review" } );
+
+                var board = variables.svc.buildBoard(
+                    projectId : ctx.project.getId(),
+                    filters   : { search : "invoice" }
+                );
+                expect( board.totalTasks ).toBe( 2 );
+            } );
+
+            it( "buildBoard priority filter narrows correctly", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "low task",  priority : "low"  } );
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "high task", priority : "high" } );
+
+                var board = variables.svc.buildBoard(
+                    projectId : ctx.project.getId(),
+                    filters   : { priority : "high" }
+                );
+                expect( board.totalTasks ).toBe( 1 );
+            } );
+
+            it( "buildBoard surfaces the normalized filters back in the result", function(){
+                var ctx   = setupProject( fixtureOrgIds );
+                var board = variables.svc.buildBoard(
+                    projectId : ctx.project.getId(),
+                    filters   : { search : "  trimmed  ", priority : "high" }
+                );
+                expect( board.filters.search ).toBe( "trimmed", "Search filter is trimmed." );
+                expect( board.filters.priority ).toBe( "high" );
+            } );
+
+            it( "buildColumn returns just the tasks in one status bucket", function(){
+                var ctx     = setupProject( fixtureOrgIds );
+                var doneRow = "";
+                for ( var s in variables.statusSvc.listForProject( ctx.project.getId() ) ) {
+                    if ( !!s.getIsCompleted() ) doneRow = s;
+                }
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "not done" } );
+                variables.taskSvc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "done one", statusId : doneRow.getId() } );
+
+                var col = variables.svc.buildColumn(
+                    projectId : ctx.project.getId(),
+                    statusId  : doneRow.getId()
+                );
+                expect( arrayLen( col.tasks ) ).toBe( 1 );
+                expect( col.tasks[ 1 ].getTitle() ).toBe( "done one" );
+                expect( col.status.getId() ).toBe( doneRow.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------- fixture helpers ----------
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            {
+                id   : orgId,
+                name : "board-" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                slug : "board-" & lCase( replace( createUUID(), "-", "", "all" ) )
+            }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( {
+            organizationId : orgId,
+            name           : "board-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        return { orgId : orgId, project : project };
+    }
+
+}

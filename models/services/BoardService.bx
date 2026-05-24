@@ -1,0 +1,136 @@
+/**
+ * BoardService: groups tasks by project status into the kanban
+ * column model the board view consumes.
+ *
+ * Phase 3a ships the server-side grouping + filter pipeline. The
+ * CBWire layer in Phase 3b (KanbanBoard, TaskCard, TaskDetail
+ * components) calls this service the same way; the only thing
+ * that changes between phases is the rendering surface.
+ *
+ * The service does NOT enforce permissions or Option C visibility
+ * by itself. Callers route reads through VisibilityService when
+ * the viewer might be a contact; agent-side calls bypass the
+ * tenant scope automatically because TaskService.listForProject
+ * already does so (the kanban surface is agent-facing at Phase 3a;
+ * the contact-facing project board lands in Phase 11).
+ *
+ * Public shape:
+ *
+ *   var board = boardService.buildBoard(
+ *       projectId : "<uuid>",
+ *       filters   : {
+ *           statusId     : "",   // optional pin to one column
+ *           assigneeType : "",   // "agent" | "contact"
+ *           assigneeId   : "",
+ *           priority     : "",   // "low" | "medium" | "high" | "urgent"
+ *           search       : ""    // matches against task.title
+ *       }
+ *   );
+ *   // board.statuses = [ ProjectStatus entities, sort_order ASC ]
+ *   // board.columns  = {
+ *   //     "<statusId>"   : { status : <entity>, tasks : [ ... ] },
+ *   //     ""             : { status : "",       tasks : [ ... ] }   // unassigned-status bucket
+ *   // }
+ *   // board.totalTasks = N
+ *   // board.filters    = the applied filter struct (for view binding)
+ */
+class singleton=true {
+
+    property name="taskService"          inject="TaskService@tesserabx-pm";
+    property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+
+    /**
+     * Build the board state for a project. Returns a struct the
+     * view can render directly. Filters are optional and compose
+     * with AND semantics.
+     */
+    public struct function buildBoard(
+        required string projectId,
+        struct filters = {}
+    ){
+        var safeFilters = normalizeFilters( arguments.filters );
+
+        var statuses = projectStatusService.listForProject( arguments.projectId );
+        var tasks    = taskService.listForProject(
+            projectId    = arguments.projectId,
+            statusId     = safeFilters.statusId,
+            assigneeType = safeFilters.assigneeType,
+            assigneeId   = safeFilters.assigneeId,
+            priority     = safeFilters.priority,
+            search       = safeFilters.search,
+            limit        = 500
+        );
+
+        return {
+            statuses    : statuses,
+            columns     : groupTasks( tasks, statuses ),
+            totalTasks  : arrayLen( tasks ),
+            filters     : safeFilters
+        };
+    }
+
+    /**
+     * Convenience: return only the column bucket for a single
+     * status. The kanban CBWire components in Phase 3b call this
+     * for the per-column re-renders that follow a drag-drop or
+     * quick-add (re-rendering the whole board on every action is
+     * wasteful).
+     */
+    public struct function buildColumn(
+        required string projectId,
+        required string statusId,
+        struct filters = {}
+    ){
+        var safeFilters = normalizeFilters( arguments.filters );
+        safeFilters.statusId = arguments.statusId;
+        var tasks = taskService.listForProject(
+            projectId    = arguments.projectId,
+            statusId     = arguments.statusId,
+            assigneeType = safeFilters.assigneeType,
+            assigneeId   = safeFilters.assigneeId,
+            priority     = safeFilters.priority,
+            search       = safeFilters.search,
+            limit        = 500
+        );
+        var status = projectStatusService.getStatus( arguments.statusId );
+        return {
+            status  : isNull( status ) ? "" : status,
+            tasks   : tasks,
+            filters : safeFilters
+        };
+    }
+
+    // ---------- internals ----------
+
+    private struct function normalizeFilters( required any filters ){
+        var f = isStruct( arguments.filters ) ? arguments.filters : {};
+        return {
+            statusId     : trim( f.statusId     ?: "" ),
+            assigneeType : trim( f.assigneeType ?: "" ),
+            assigneeId   : trim( f.assigneeId   ?: "" ),
+            priority     : trim( f.priority     ?: "" ),
+            search       : trim( f.search       ?: "" )
+        };
+    }
+
+    /**
+     * Bucket the tasks under their status_id. Statuses missing from
+     * the project (or null status_id rows) land in the "" bucket so
+     * the view can render an "Unassigned status" column.
+     */
+    private struct function groupTasks( required array tasks, required array statuses ){
+        var columns = {};
+        for ( var s in arguments.statuses ) {
+            columns[ s.getId() ] = { status : s, tasks : [] };
+        }
+        columns[ "" ] = { status : "", tasks : [] };
+
+        for ( var t in arguments.tasks ) {
+            var key = t.getStatusId() ?: "";
+            if ( !structKeyExists( columns, key ) ) key = "";
+            columns[ key ].tasks.append( t );
+        }
+        return columns;
+    }
+
+}
