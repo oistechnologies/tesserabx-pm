@@ -25,6 +25,13 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
+    // PM's external URL surface (/agent/pm, /pm, /agent/admin/pm) is
+    // declared in settings.tesserabx.routeClaims and registered by
+    // the host's AddonRouteClaimsRegistrar at boot. The entryPoint
+    // is kept as the add-on slug so PM has a well-known module
+    // identifier in ColdBox; the URL space `/tesserabx-pm/*` is
+    // available for any internal admin pages PM wants but is not
+    // the canonical landing for any user-facing surface.
     this.entryPoint         = "tesserabx-pm";
     this.modelNamespace     = "tesserabx-pm";
     this.cfmapping          = "tesserabx.modules.tesserabx-pm";
@@ -41,23 +48,130 @@ class {
                 displayName    : "Project Management",
                 version        : "0.0.1",
                 minCoreVersion : "0.0.1",
-                contributesTo  : [],
+                contributesTo  : [
+                    "permissions", "roles", "navigation",
+                    "adminPages", "settings", "routeClaims"
+                ],
                 requiresAi     : false,
 
-                // Registry contributions. Every array is intentionally
-                // empty at Phase 0. Each subsequent phase fills the
-                // arrays it owns and adds matching probes to the
+                // Registry contributions. Each subsequent phase fills
+                // the arrays it owns and adds matching probes to the
                 // InstallSpec. The set of keys here mirrors the host
                 // EXTENSIONS.md registry catalog; missing keys are
                 // treated as empty by AddonRegistryService.
 
                 // Phase 1: permissions, roles, navigation, admin
                 // landing card, per-tenant settings.
-                permissions             : [],
-                roles                   : [],
-                navigation              : [],
-                adminPages              : [],
-                settings                : [],
+                permissions : [
+                    { id : "pm.view",          label : "View PM projects and tasks",            description : "Read PM data within the viewer's organization, subject to Option C visibility." },
+                    { id : "pm.create",        label : "Create PM projects and tasks",          description : "Create projects, tasks, and subtasks." },
+                    { id : "pm.edit",          label : "Edit PM projects and tasks",            description : "Update projects, tasks, subtasks, comments, labels, and custom field values." },
+                    { id : "pm.delete",        label : "Delete PM projects and tasks",          description : "Soft-delete or archive projects, tasks, and subtasks." },
+                    { id : "pm.assign-client", label : "Assign tasks to client users",          description : "Assign tasks to contacts (clients), not just agents. Agent-side only." },
+                    { id : "pm.admin",         label : "Administer PM",                         description : "Manage templates, project status sets, per-project custom fields, per-tenant PM settings." }
+                ],
+                roles : [
+                    {
+                        id          : "pm-admin",
+                        label       : "PM Admin",
+                        description : "Full PM access including templates, custom fields, and per-tenant settings.",
+                        surface     : "agent",
+                        permissions : [ "pm.view", "pm.create", "pm.edit", "pm.delete", "pm.assign-client", "pm.admin" ]
+                    },
+                    {
+                        id          : "pm-manager",
+                        label       : "PM Manager",
+                        description : "Manage projects and tasks; can assign work to clients.",
+                        surface     : "agent",
+                        permissions : [ "pm.view", "pm.create", "pm.edit", "pm.delete", "pm.assign-client" ]
+                    },
+                    {
+                        id          : "pm-contributor",
+                        label       : "PM Contributor",
+                        description : "Create and edit projects and tasks; cannot delete or assign to clients.",
+                        surface     : "agent",
+                        permissions : [ "pm.view", "pm.create", "pm.edit" ]
+                    },
+                    {
+                        id          : "pm-viewer",
+                        label       : "PM Viewer",
+                        description : "Read-only access to PM projects and tasks.",
+                        surface     : "agent",
+                        permissions : [ "pm.view" ]
+                    },
+                    {
+                        id          : "pm-client-viewer",
+                        label       : "PM Client Viewer",
+                        description : "Client-side: read-only access to PM projects shared with their organization.",
+                        surface     : "contact",
+                        permissions : [ "pm.view" ]
+                    },
+                    {
+                        id          : "pm-client-contributor",
+                        label       : "PM Client Contributor",
+                        description : "Client-side: read and edit access to PM projects shared with their organization.",
+                        surface     : "contact",
+                        permissions : [ "pm.view", "pm.edit" ]
+                    }
+                ],
+                // Top-level URL claims. The host's RouteClaimsRegistry
+                // walks every manifest for `routeClaims` and the
+                // AddonRouteClaimsRegistrar interceptor injects each
+                // into ColdBox's main router on `afterAspectsLoad`
+                // (prepended so the claim matches before the host's
+                // catch-all). Each entry composes a ColdBox event
+                // string of the form `<module>:<Handler>.<action>`.
+                routeClaims : [
+                    { path : "/agent/pm",       verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index"  },
+                    { path : "/agent/admin/pm", verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index"  },
+                    { path : "/pm",             verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index"  }
+                ],
+                navigation : [
+                    {
+                        id                 : "pm.agent.main",
+                        surface            : "agent",
+                        menu               : "main",
+                        label              : "Projects",
+                        route              : "/agent/pm",
+                        icon               : "bi bi-kanban",
+                        sortWeight         : 200,
+                        requiresAuth       : true,
+                        requiredPermission : "pm.view"
+                    },
+                    {
+                        id                 : "pm.portal.main",
+                        surface            : "portal",
+                        menu               : "main",
+                        label              : "Projects",
+                        route              : "/pm",
+                        icon               : "bi bi-kanban",
+                        sortWeight         : 200,
+                        requiresAuth       : true,
+                        requiredPermission : "pm.view"
+                    }
+                ],
+                adminPages : [
+                    {
+                        id                 : "pm.admin.landing",
+                        title              : "Project Management",
+                        description        : "Configure PM templates, custom fields, and per-tenant settings.",
+                        route              : "/agent/admin/pm",
+                        icon               : "bi bi-kanban",
+                        sortWeight         : 600,
+                        requiredPermission : "pm.admin"
+                    }
+                ],
+                settings : [
+                    {
+                        key         : "pm.default-template-id",
+                        type        : "string",
+                        label       : "Default project template",
+                        description : "Optional template to apply on project creation. Blank uses the shared Standard Workflow template.",
+                        default     : "",
+                        secret      : false,
+                        perTenant   : true
+                    }
+                ],
 
                 // Phase 2 onward: API surface.
                 apiResources            : [],
@@ -95,9 +209,30 @@ class {
     }
 
     function onLoad(){
-        // WireBox mappings are added as services arrive in later
-        // phases. Phase 0 ships only the placeholder handler, which
-        // ColdBox resolves automatically.
+        // Quick entity mappings. autoMapModels is false, so every
+        // entity Quick may resolve through a relationship target
+        // string like "Project@tesserabx-pm" must be bound here.
+        // Mirrors the modules_app/tickets/ModuleConfig.bx pattern:
+        // entities are not singletons (each call returns a new
+        // instance); services and DTOs added in later phases will
+        // use .asSingleton().
+        binder.map( "ProjectTemplate@tesserabx-pm"  ).to( "#moduleMapping#.models.entities.ProjectTemplate"  );
+        binder.map( "Project@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Project"          );
+        binder.map( "ProjectStatus@tesserabx-pm"    ).to( "#moduleMapping#.models.entities.ProjectStatus"    );
+        binder.map( "ProjectMember@tesserabx-pm"    ).to( "#moduleMapping#.models.entities.ProjectMember"    );
+        binder.map( "ProjectEvent@tesserabx-pm"     ).to( "#moduleMapping#.models.entities.ProjectEvent"     );
+        binder.map( "Label@tesserabx-pm"            ).to( "#moduleMapping#.models.entities.Label"            );
+        binder.map( "TaskLabel@tesserabx-pm"        ).to( "#moduleMapping#.models.entities.TaskLabel"        );
+        binder.map( "CustomField@tesserabx-pm"      ).to( "#moduleMapping#.models.entities.CustomField"      );
+        binder.map( "CustomFieldValue@tesserabx-pm" ).to( "#moduleMapping#.models.entities.CustomFieldValue" );
+        binder.map( "Task@tesserabx-pm"             ).to( "#moduleMapping#.models.entities.Task"             );
+        binder.map( "Subtask@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Subtask"          );
+        binder.map( "TaskTicket@tesserabx-pm"       ).to( "#moduleMapping#.models.entities.TaskTicket"       );
+        binder.map( "Comment@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Comment"          );
+        binder.map( "Watcher@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Watcher"          );
+        binder.map( "Mention@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Mention"          );
+        binder.map( "TimeLog@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.TimeLog"          );
+        binder.map( "Attachment@tesserabx-pm"       ).to( "#moduleMapping#.models.entities.Attachment"       );
     }
 
     function onUnload(){}

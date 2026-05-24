@@ -1,0 +1,81 @@
+/**
+ * Task: the kanban-board level entity. Tenant-scoped.
+ *
+ * Polymorphic assignee (agent | contact) per BUILD-PLAN §3.4 — the
+ * two columns assignee_type + assignee_id together identify the
+ * assignee; no FK on the pair. Service layer validates.
+ *
+ * is_client_visible drives BUILD-PLAN §3.3 Option C visibility on
+ * top of the tenant scope.
+ *
+ * Soft-deletes via deleted_at per BUILD-PLAN §3.13. Embedding
+ * column populated by the Phase 12 embedding consumer.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_tasks"
+    accessors="true"
+{
+
+    property name="id";
+    property name="projectId"        column="project_id";
+    property name="organizationId"   column="organization_id";
+    property name="statusId"         column="status_id";
+
+    property name="title";
+    property name="description";
+    property name="priority";
+
+    property name="assigneeType"     column="assignee_type";
+    property name="assigneeId"       column="assignee_id";
+
+    property name="startDate"        column="start_date" sqltype="date";
+    property name="dueDate"          column="due_date"   sqltype="date";
+    property name="estimatedHours"   column="estimated_hours";
+
+    property name="isClientVisible"  column="is_client_visible";
+    property name="sortOrder"        column="sort_order";
+    property name="completedAt"      column="completed_at" sqltype="timestamp";
+
+    property name="createdByType"    column="created_by_type";
+    property name="createdById"      column="created_by_id";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+    property name="deletedAt"        column="deleted_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function project(){
+        return belongsTo( "Project@tesserabx-pm", "project_id" );
+    }
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+    function status(){
+        return belongsTo( "ProjectStatus@tesserabx-pm", "status_id" );
+    }
+
+    function subtasks(){
+        return hasMany( "Subtask@tesserabx-pm", "task_id" );
+    }
+
+    function labels(){
+        return belongsToMany(
+            relationName     = "Label@tesserabx-pm",
+            table            = "pm_task_labels",
+            foreignPivotKey  = "task_id",
+            relatedPivotKey  = "label_id"
+        );
+    }
+
+    function taskTickets(){
+        return hasMany( "TaskTicket@tesserabx-pm", "task_id" );
+    }
+
+}

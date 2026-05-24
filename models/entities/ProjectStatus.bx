@@ -1,0 +1,41 @@
+/**
+ * ProjectStatus: a per-project kanban column.
+ *
+ * is_completed marks a terminal status, which the Phase 8
+ * close-on-complete listener uses to detect "task finished" and
+ * prompt to close any linked tickets.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_project_statuses"
+    accessors="true"
+{
+
+    property name="id";
+    property name="projectId"        column="project_id";
+    property name="organizationId"   column="organization_id";
+
+    property name="name";
+    property name="color";
+    property name="sortOrder"        column="sort_order";
+
+    property name="isDefault"        column="is_default";
+    property name="isCompleted"      column="is_completed";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function project(){
+        return belongsTo( "Project@tesserabx-pm", "project_id" );
+    }
+
+    function tasks(){
+        return hasMany( "Task@tesserabx-pm", "status_id" );
+    }
+
+}

@@ -1,0 +1,46 @@
+/**
+ * ProjectEvent: a row in PM's domain timeline.
+ *
+ * Parallel to the host tickets module's TicketEvent. Captures
+ * granular activity (status changes, comment edits, label toggles,
+ * etc.) and feeds the project activity surface. Cross-cutting
+ * compliance events also flow to the host audit module through
+ * the manifest's auditEvents declarations, but those are coarser.
+ *
+ * Polymorphic subject (project | task | subtask | comment) and
+ * polymorphic actor (agent | contact | system). No FK on either
+ * pair per BUILD-PLAN §3.4.
+ *
+ * No updated_at: events are append-only.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_project_events"
+    accessors="true"
+{
+
+    property name="id";
+    property name="projectId"        column="project_id";
+    property name="organizationId"   column="organization_id";
+
+    property name="subjectType"      column="subject_type";
+    property name="subjectId"        column="subject_id";
+
+    property name="actorType"        column="actor_type";
+    property name="actorId"          column="actor_id";
+
+    property name="action";
+    property name="changesJson"      column="changes_json";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function project(){
+        return belongsTo( "Project@tesserabx-pm", "project_id" );
+    }
+
+}

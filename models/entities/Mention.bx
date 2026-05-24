@@ -1,0 +1,37 @@
+/**
+ * Mention: a parsed @mention from a comment body.
+ *
+ * Polymorphic mention target (agent | contact). Set by the
+ * MentionService at comment-save time; notified_at is stamped when
+ * the host notifications module has delivered the in-app
+ * notification; read_at when the mentioned user opens the surface.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_mentions"
+    accessors="true"
+{
+
+    property name="id";
+    property name="commentId"          column="comment_id";
+    property name="organizationId"     column="organization_id";
+
+    property name="mentionedUserType"  column="mentioned_user_type";
+    property name="mentionedUserId"    column="mentioned_user_id";
+
+    property name="notifiedAt"         column="notified_at" sqltype="timestamp";
+    property name="readAt"             column="read_at"     sqltype="timestamp";
+
+    property name="createdAt"          column="created_at"  sqltype="timestamp";
+    property name="updatedAt"          column="updated_at"  sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function comment(){
+        return belongsTo( "Comment@tesserabx-pm", "comment_id" );
+    }
+
+}

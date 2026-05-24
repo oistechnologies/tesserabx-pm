@@ -1,0 +1,56 @@
+/**
+ * Comment: polymorphic across Project, Task, and Subtask.
+ *
+ * commentable_type is one of: project | task | subtask.
+ * commentable_id holds the target's UUID. No FK on the pair; the
+ * service layer validates.
+ *
+ * is_internal drives BUILD-PLAN §3.5 visibility: agent comments
+ * default to internal; contact comments are forced external; the
+ * portal surface never renders internal comments.
+ *
+ * Threaded via the nullable self-referencing parent_comment_id.
+ * Soft-deletes via deleted_at per BUILD-PLAN §3.13.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_comments"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"   column="organization_id";
+
+    property name="commentableType"  column="commentable_type";
+    property name="commentableId"    column="commentable_id";
+
+    property name="parentCommentId"  column="parent_comment_id";
+
+    property name="authorType"       column="author_type";
+    property name="authorId"         column="author_id";
+
+    property name="body";
+    property name="isInternal"       column="is_internal";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+    property name="deletedAt"        column="deleted_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function parent(){
+        return belongsTo( "Comment@tesserabx-pm", "parent_comment_id" );
+    }
+
+    function replies(){
+        return hasMany( "Comment@tesserabx-pm", "parent_comment_id" );
+    }
+
+    function mentions(){
+        return hasMany( "Mention@tesserabx-pm", "comment_id" );
+    }
+
+}

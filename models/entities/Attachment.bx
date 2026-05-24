@@ -1,0 +1,40 @@
+/**
+ * Attachment: a polymorphic file attachment on a Task, Subtask, or
+ * Comment.
+ *
+ * Distinct from the host's own `attachments` table (which holds
+ * ticket and message attachments). File contents live on the
+ * host's CBFS provider; `file_path` is the CBFS-relative key.
+ *
+ * Polymorphic attachable (task | subtask | comment) and
+ * polymorphic uploader (agent | contact). No FK on either pair.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_attachments"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"   column="organization_id";
+
+    property name="attachableType"   column="attachable_type";
+    property name="attachableId"     column="attachable_id";
+
+    property name="filePath"         column="file_path";
+    property name="fileName"         column="file_name";
+    property name="fileSize"         column="file_size";
+    property name="mimeType"         column="mime_type";
+
+    property name="uploadedByType"   column="uploaded_by_type";
+    property name="uploadedById"     column="uploaded_by_id";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+}

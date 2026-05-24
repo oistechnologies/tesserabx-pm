@@ -1,0 +1,46 @@
+/**
+ * CustomField: a per-project custom field definition.
+ *
+ * Per BUILD-PLAN §3.16, PM keeps its own per-project custom field
+ * surface separate from the host's per-tenant CustomFieldsService.
+ * The rationale lives in that section.
+ *
+ * field_type is one of: text, number, date, dropdown, multiselect,
+ * checkbox, url. options_json (TEXT, JSON-encoded) carries choice
+ * sets for dropdowns. applies_to is one of: task, subtask, both.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_custom_fields"
+    accessors="true"
+{
+
+    property name="id";
+    property name="projectId"        column="project_id";
+    property name="organizationId"   column="organization_id";
+
+    property name="name";
+    property name="fieldType"        column="field_type";
+    property name="optionsJson"      column="options_json";
+
+    property name="isRequired"       column="is_required";
+    property name="appliesTo"        column="applies_to";
+    property name="sortOrder"        column="sort_order";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function project(){
+        return belongsTo( "Project@tesserabx-pm", "project_id" );
+    }
+
+    function values(){
+        return hasMany( "CustomFieldValue@tesserabx-pm", "custom_field_id" );
+    }
+
+}

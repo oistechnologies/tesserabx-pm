@@ -1,0 +1,48 @@
+/**
+ * TaskTicket: the bidirectional join between a PM task and a host
+ * ticket.
+ *
+ * PM owns this row; the host tickets module is unaware of PM. The
+ * "Linked PM tasks" panel rendered on the host ticket detail
+ * (Phase 8 via the ticketPanels manifest entry) reads through PM's
+ * TaskTicketService, which queries this table.
+ *
+ * link_type is one of: related | blocks | fixes.
+ *
+ * organization_id is nullable per BUILD-PLAN §7.6: a ticket may be
+ * accountless, in which case the link row is too.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_task_tickets"
+    accessors="true"
+{
+
+    property name="id";
+    property name="taskId"           column="task_id";
+    property name="ticketId"         column="ticket_id";
+    property name="organizationId"   column="organization_id";
+
+    property name="linkType"         column="link_type";
+
+    property name="linkedByType"     column="linked_by_type";
+    property name="linkedById"       column="linked_by_id";
+    property name="linkedAt"         column="linked_at" sqltype="timestamp";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function task(){
+        return belongsTo( "Task@tesserabx-pm", "task_id" );
+    }
+
+    function ticket(){
+        return belongsTo( "Ticket@tickets", "ticket_id" );
+    }
+
+}

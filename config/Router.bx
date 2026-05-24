@@ -1,17 +1,18 @@
 /**
  * tesserabx-pm module router.
  *
- * Routes live under PM's own entryPoint (/tesserabx-pm/*) per the
- * host's add-on convention. The reference add-on (sample-addons/
- * example-sync) documents why: cross-module routing from a module
- * router is brittle in this ColdBox version, so add-on routes are
- * mounted under the add-on's own URL prefix.
+ * PM's external URL surface (/agent/pm, /pm, /agent/admin/pm) is
+ * declared in settings.tesserabx.routeClaims in ModuleConfig.bx
+ * and bound to ColdBox by the host's AddonRouteClaimsRegistrar on
+ * `afterAspectsLoad`. That keeps the BUILD-PLAN paths exact and
+ * sidesteps ColdBox 8's module-Router entryPoint auto-prefix.
  *
- * Phase 0 ships a single placeholder route. Phases 2 onward expand
- * the surface (projects, tasks, board, API, admin).
- *
- * URLs (all under /tesserabx-pm/):
- *   GET /                                -> Main.index   "PM installed" page
+ * This router only handles routes under the entryPoint
+ * `/tesserabx-pm/*`, which is reserved for any PM-internal admin
+ * URLs that don't need to live on the agent or portal surfaces.
+ * The single `/` route below targets the same Main.index handler
+ * for parity, so a developer hitting the entry point gets the
+ * placeholder rather than a 404 while exploring the module.
  */
 class {
 

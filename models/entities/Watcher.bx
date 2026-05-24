@@ -1,0 +1,39 @@
+/**
+ * Watcher: a follow on Project, Task, or Subtask.
+ *
+ * Polymorphic on both sides: watchable (project | task | subtask)
+ * AND watcher (agent | contact). No FKs on either pair; the
+ * service layer validates and applies the cross-side uniqueness
+ * via the (watchable_type, watchable_id, watcher_type, watcher_id)
+ * DB unique constraint.
+ *
+ * auto_added=true distinguishes implicit watches (set by the
+ * WatcherService on assignment or on commenting) from explicit
+ * watches (clicked "watch" on the UI).
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_watchers"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"   column="organization_id";
+
+    property name="watchableType"    column="watchable_type";
+    property name="watchableId"      column="watchable_id";
+
+    property name="watcherType"      column="watcher_type";
+    property name="watcherId"        column="watcher_id";
+
+    property name="autoAdded"        column="auto_added";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+}

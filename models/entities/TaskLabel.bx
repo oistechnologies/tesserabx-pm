@@ -1,0 +1,33 @@
+/**
+ * TaskLabel: many-to-many join row between a task and a label.
+ *
+ * Not tenant-scoped directly: the join carries no organization_id
+ * column. Tenant protection lives on the Task and Label sides; any
+ * query that lands on TaskLabel goes through one of those parents.
+ * Direct queries against this entity should be reviewed.
+ *
+ * The Task and Label entities both expose belongsToMany() through
+ * this pivot, so service code usually never instantiates TaskLabel
+ * directly. The entity exists so a per-row id, created_at, and the
+ * explicit relationship hooks below are available when needed.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_task_labels"
+    accessors="true"
+{
+
+    property name="id";
+    property name="taskId"     column="task_id";
+    property name="labelId"    column="label_id";
+    property name="createdAt"  column="created_at" sqltype="timestamp";
+
+    function task(){
+        return belongsTo( "Task@tesserabx-pm", "task_id" );
+    }
+
+    function label(){
+        return belongsTo( "Label@tesserabx-pm", "label_id" );
+    }
+
+}

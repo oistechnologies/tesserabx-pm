@@ -1,0 +1,75 @@
+/**
+ * Project: the top of the Project > Task > Subtask hierarchy.
+ *
+ * Tenant-scoped. Soft-deletes via deleted_at per BUILD-PLAN §3.13.
+ * Embedding column populated by the Phase 12 embedding consumer.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_projects"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"        column="organization_id";
+
+    property name="name";
+    property name="description";
+
+    property name="visibilityScope"       column="visibility_scope";
+    property name="lifecycleStatus"       column="lifecycle_status";
+
+    property name="startDate"             column="start_date" sqltype="date";
+    property name="endDate"               column="end_date"   sqltype="date";
+
+    property name="timeTrackingEnabled"   column="time_tracking_enabled";
+    property name="isTemplate"            column="is_template";
+    property name="templateSourceId"      column="template_source_id";
+
+    property name="createdByType"         column="created_by_type";
+    property name="createdById"           column="created_by_id";
+    property name="updatedByType"         column="updated_by_type";
+    property name="updatedById"           column="updated_by_id";
+
+    property name="createdAt"             column="created_at" sqltype="timestamp";
+    property name="updatedAt"             column="updated_at" sqltype="timestamp";
+    property name="deletedAt"             column="deleted_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+    function templateSource(){
+        return belongsTo( "ProjectTemplate@tesserabx-pm", "template_source_id" );
+    }
+
+    function statuses(){
+        return hasMany( "ProjectStatus@tesserabx-pm", "project_id" );
+    }
+
+    function labels(){
+        return hasMany( "Label@tesserabx-pm", "project_id" );
+    }
+
+    function customFields(){
+        return hasMany( "CustomField@tesserabx-pm", "project_id" );
+    }
+
+    function members(){
+        return hasMany( "ProjectMember@tesserabx-pm", "project_id" );
+    }
+
+    function tasks(){
+        return hasMany( "Task@tesserabx-pm", "project_id" );
+    }
+
+    function events(){
+        return hasMany( "ProjectEvent@tesserabx-pm", "project_id" );
+    }
+
+}

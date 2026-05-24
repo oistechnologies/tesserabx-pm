@@ -1,0 +1,42 @@
+/**
+ * TimeLog: a polymorphic time entry on Task or Subtask.
+ *
+ * Per BUILD-PLAN §3.7, time tracking is per-project opt-in via
+ * pm_projects.time_tracking_enabled. The TimeTrackingService gates
+ * the create path against that flag.
+ *
+ * Polymorphic loggable (task | subtask) and polymorphic user
+ * (agent | contact); either may log time if the project allows.
+ * is_billable drives billable/non-billable filtering in reports.
+ * Soft-deletes via deleted_at per BUILD-PLAN §3.13.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_time_logs"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"   column="organization_id";
+
+    property name="loggableType"     column="loggable_type";
+    property name="loggableId"       column="loggable_id";
+
+    property name="userType"         column="user_type";
+    property name="userId"           column="user_id";
+
+    property name="hours";
+    property name="loggedAt"         column="logged_at" sqltype="timestamp";
+    property name="description";
+    property name="isBillable"       column="is_billable";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+    property name="deletedAt"        column="deleted_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+}

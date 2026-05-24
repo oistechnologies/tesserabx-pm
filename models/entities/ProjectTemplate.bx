@@ -1,0 +1,45 @@
+/**
+ * ProjectTemplate: a snapshot of project structure that hydrates a
+ * new project on creation.
+ *
+ * organization_id is nullable: a row with NULL organization_id is
+ * a shared template (the seeded "Standard Workflow" is one);
+ * tenant-owned templates carry the org id. TenantScope@contacts
+ * still applies; the scope's WHERE predicate only fires when the
+ * viewer has a tenant context (a `contact` user), and the shared
+ * row's NULL org will not match — which is correct: a contact does
+ * not see shared admin templates by default.
+ *
+ * Agent users have no tenant context, so the scope is a no-op and
+ * they see every template.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_project_templates"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId" column="organization_id";
+    property name="name";
+    property name="description";
+    property name="structureJson"  column="structure_json";
+
+    property name="createdByType"  column="created_by_type";
+    property name="createdById"    column="created_by_id";
+
+    property name="isShared"       column="is_shared";
+
+    property name="createdAt"      column="created_at" sqltype="timestamp";
+    property name="updatedAt"      column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+}

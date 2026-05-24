@@ -1,0 +1,40 @@
+/**
+ * CustomFieldValue: a polymorphic value row for a custom field on
+ * a Task or Subtask.
+ *
+ * `value` is TEXT, normalized per the field type: dates as ISO
+ * strings, numbers as decimal strings, multiselect as JSON-encoded
+ * arrays. The field definition's `field_type` drives parsing on
+ * read.
+ *
+ * The DB UNIQUE on (custom_field_id, valuable_type, valuable_id)
+ * supports an upsert-on-conflict pattern at the service layer.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_custom_field_values"
+    accessors="true"
+{
+
+    property name="id";
+    property name="customFieldId"    column="custom_field_id";
+    property name="organizationId"   column="organization_id";
+
+    property name="valuableType"     column="valuable_type";
+    property name="valuableId"       column="valuable_id";
+
+    property name="value";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function customField(){
+        return belongsTo( "CustomField@tesserabx-pm", "custom_field_id" );
+    }
+
+}

@@ -1,0 +1,41 @@
+/**
+ * ProjectMember: explicit project membership when
+ * Project.visibility_scope is 'specific_members'.
+ *
+ * Polymorphic member (agent | contact) per BUILD-PLAN §3.4. The
+ * `role` column is the project-local role (owner | manager |
+ * contributor | viewer), distinct from the TesseraBX-wide RBAC
+ * roles registered in the manifest.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_project_members"
+    accessors="true"
+{
+
+    property name="id";
+    property name="projectId"        column="project_id";
+    property name="organizationId"   column="organization_id";
+
+    property name="memberType"       column="member_type";
+    property name="memberId"         column="member_id";
+
+    property name="role";
+
+    property name="addedByType"      column="added_by_type";
+    property name="addedById"        column="added_by_id";
+    property name="addedAt"          column="added_at" sqltype="timestamp";
+
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function project(){
+        return belongsTo( "Project@tesserabx-pm", "project_id" );
+    }
+
+}
