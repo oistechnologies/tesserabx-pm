@@ -289,6 +289,13 @@ class singleton=true {
         project.setUpdatedById(   arguments.data.actorId   ?: javaCast( "null", "" ) );
         project.save();
 
+        writeAuditEvent(
+            type      : "tesserabx-pm.project_deleted",
+            project   : project,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: ""
+        );
+
         return project;
     }
 
@@ -310,7 +317,7 @@ class singleton=true {
                     actorId        : arguments.actorId,
                     entity         : { type : "Project", id : arguments.project.getId() }
                 ),
-                true
+                false
             );
         } catch ( any e ) {
             // Event emission is best-effort. A misbehaving listener

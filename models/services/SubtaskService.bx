@@ -206,7 +206,7 @@ class singleton=true {
         required string actorType,
         required string actorId,
         struct metadata = {},
-        boolean async   = true
+        boolean async   = false
     ){
         try {
             interceptorService.announce(

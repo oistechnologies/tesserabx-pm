@@ -74,6 +74,16 @@
 					<p class="text-body-secondary mb-0 small">The task board groups by project status. Click "Open board" to see the columns; the Phase 3 kanban view adds drag-and-drop.</p>
 				</div>
 			</div>
+
+			<div class="mt-3">
+				#wire(
+					name   = "ProjectEventFeed@tesserabx-pm",
+					params = {
+						projectId      : local.p.getId(),
+						organizationId : local.p.getOrganizationId()
+					}
+				)#
+			</div>
 		</div>
 
 		<div class="col-12 col-lg-4">

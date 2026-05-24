@@ -1,0 +1,158 @@
+/**
+ * ProjectEventLogger: listens to the canonical onPm* envelopes
+ * announced by the PM services and appends one pm_project_events
+ * row per event.
+ *
+ * Listeners share a single recordFromEnvelope helper because every
+ * non-comment subject has the same shape: entity.type carries the
+ * subject family, entity.id the row id. Comments take a separate
+ * path because they live polymorphically under projects, tasks, or
+ * subtasks: we resolve the owning project by walking from
+ * metadata.commentable_type + commentable_id.
+ *
+ * Listener bodies are wrapped in try/catch via the helper because a
+ * misbehaving listener must not break the originating PM write. The
+ * inline writeAuditEvent calls in ProjectService / TaskService are
+ * the source of truth for cross-cutting compliance events; this
+ * interceptor only writes PM's domain timeline.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    /**
+     * Lazy lookup. Eager injection of ProjectEventService here would
+     * fire before the module's onLoad() registers the binding because
+     * ColdBox instantiates interceptors during module load. Resolving
+     * on first use sidesteps that ordering issue.
+     */
+    private any function projectEventService(){
+        if ( !structKeyExists( variables, "_pes" ) ) {
+            variables._pes = wirebox.getInstance( "ProjectEventService@tesserabx-pm" );
+        }
+        return variables._pes;
+    }
+
+    function onPmProjectCreated(  event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "project_created"  ); }
+    function onPmProjectArchived( event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "project_archived" ); }
+
+    function onPmTaskCreated(       event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "task_created"        ); }
+    function onPmTaskAssigned(      event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "task_assigned"       ); }
+    function onPmTaskStatusChanged( event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "task_status_changed" ); }
+    function onPmTaskCompleted(     event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "task_completed"      ); }
+
+    function onPmSubtaskCreated(   event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "subtask_created"   ); }
+    function onPmSubtaskCompleted( event, interceptData, rc, prc ){ recordFromEnvelope( arguments.interceptData, "subtask_completed" ); }
+
+    function onPmCommentAdded( event, interceptData, rc, prc ){ recordFromCommentEnvelope( arguments.interceptData ); }
+
+    // ---------------- internals ----------------
+
+    private void function recordFromEnvelope( required struct envelope, required string action ){
+        try {
+            var entity = structKeyExists( arguments.envelope, "entity" ) ? arguments.envelope.entity : {};
+            if ( !isStruct( entity ) ) return;
+            if ( !structKeyExists( entity, "type" ) || !structKeyExists( entity, "id" ) ) return;
+            var subjectType = lCase( entity.type );
+            var subjectId   = entity.id;
+            var projectId   = projectIdForSubject( subjectType, subjectId );
+            if ( !len( projectId ) ) return;
+            var orgId    = structKeyExists( arguments.envelope, "organizationId" ) ? arguments.envelope.organizationId : "";
+            var aType    = structKeyExists( arguments.envelope, "actorType"      ) ? arguments.envelope.actorType      : "";
+            var aId      = structKeyExists( arguments.envelope, "actorId"        ) ? arguments.envelope.actorId        : "";
+            var meta     = structKeyExists( arguments.envelope, "metadata"       ) ? arguments.envelope.metadata       : {};
+            projectEventService().record( {
+                projectId      : projectId,
+                organizationId : orgId,
+                subjectType    : subjectType,
+                subjectId      : subjectId,
+                actorType      : len( aType ) ? aType : "system",
+                actorId        : aId,
+                action         : arguments.action,
+                changes        : meta
+            } );
+        } catch ( any e ) {
+            writeLog(
+                text : "ProjectEventLogger.recordFromEnvelope failed for [#arguments.action#]: #e.message# at #e.tagContext[ 1 ].template ?: "?"#:#e.tagContext[ 1 ].line ?: "?"#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * Comments record against the commentable (task/subtask/project),
+     * not the comment itself, so listForSubject("task", taskId)
+     * returns the task's full activity including comments. The
+     * comment id and is_internal flag travel through `changes` for
+     * the UI.
+     */
+    private void function recordFromCommentEnvelope( required struct envelope ){
+        try {
+            var entity   = arguments.envelope.entity   ?: {};
+            var metadata = arguments.envelope.metadata ?: {};
+            if ( !structKeyExists( entity, "id" ) ) return;
+
+            var commentableType = lCase( metadata.commentable_type ?: "" );
+            var commentableId   =        metadata.commentable_id   ?: "";
+            if ( !len( commentableType ) || !len( commentableId ) ) return;
+
+            var projectId = projectIdForSubject( commentableType, commentableId );
+            if ( !len( projectId ) ) return;
+
+            var changes = duplicate( metadata );
+            changes.comment_id = entity.id;
+
+            projectEventService().record( {
+                projectId      : projectId,
+                organizationId : arguments.envelope.organizationId ?: "",
+                subjectType    : commentableType,
+                subjectId      : commentableId,
+                actorType      : len( arguments.envelope.actorType ?: "" ) ? arguments.envelope.actorType : "system",
+                actorId        : arguments.envelope.actorId ?: "",
+                action         : "comment_added",
+                changes        : changes
+            } );
+        } catch ( any e ) {
+            writeLog(
+                text : "ProjectEventLogger.recordFromCommentEnvelope failed: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * Resolve the owning project id for a polymorphic subject.
+     * Uses raw queryExecute rather than loading the Quick entity
+     * (the global tenant scope would force an extra organization_id
+     * parameter we do not have on the listener thread, and the
+     * lookup is a single indexed column read either way).
+     */
+    private string function projectIdForSubject( required string subjectType, required string subjectId ){
+        if ( !len( arguments.subjectId ) ) return "";
+        switch ( arguments.subjectType ) {
+            case "project":
+                return arguments.subjectId;
+            case "task":
+                var r = queryExecute(
+                    "SELECT project_id FROM pm_tasks WHERE id = :id",
+                    { id : arguments.subjectId }
+                );
+                return r.recordCount ? r.project_id[ 1 ] : "";
+            case "subtask":
+                var r2 = queryExecute(
+                    "SELECT t.project_id AS pid
+                     FROM   pm_subtasks s
+                     JOIN   pm_tasks    t ON t.id = s.task_id
+                     WHERE  s.id = :id",
+                    { id : arguments.subjectId }
+                );
+                return r2.recordCount ? r2.pid[ 1 ] : "";
+        }
+        return "";
+    }
+
+}

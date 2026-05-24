@@ -1,0 +1,44 @@
+/**
+ * TaskEventFeed: the per-task activity timeline on
+ * /agent/pm/projects/:projectId/tasks/:id.
+ *
+ * Comment events are recorded against the commentable subject by
+ * the ProjectEventLogger interceptor (not against the comment
+ * itself), so listForSubject("task", taskId) returns the task's
+ * full activity feed including assignment / status / comment rows.
+ *
+ * Embed from views/tasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "TaskEventFeed@tesserabx-pm",
+ *       params = {
+ *           taskId         : prc.task.getId(),
+ *           organizationId : prc.task.getOrganizationId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="projectEventService" inject="ProjectEventService@tesserabx-pm";
+
+    data = {
+        "taskId"         : "",
+        "organizationId" : "",
+        "actorFilter"    : ""
+    };
+
+    function onMount( required struct params = {} ){
+        data.taskId         = arguments.params.taskId         ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+    }
+
+    function events(){
+        if ( !len( data.taskId ) ) return [];
+        return projectEventService.listForSubject(
+            subjectType : "task",
+            subjectId   : data.taskId,
+            filter      : { actorType : data.actorFilter ?: "" }
+        );
+    }
+
+}

@@ -1,0 +1,43 @@
+/**
+ * ProjectEventFeed: the project-level activity timeline on
+ * /agent/pm/projects/:id.
+ *
+ * Pulls from pm_project_events via ProjectEventService.listForProject,
+ * scoped to a single project. A bootstrap dropdown filters the feed
+ * by actor family (agent / contact / system / all) so the operator
+ * can isolate client-driven activity at a glance.
+ *
+ * Embed from views/projects/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "ProjectEventFeed@tesserabx-pm",
+ *       params = {
+ *           projectId      : prc.project.getId(),
+ *           organizationId : prc.project.getOrganizationId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="projectEventService" inject="ProjectEventService@tesserabx-pm";
+
+    data = {
+        "projectId"      : "",
+        "organizationId" : "",
+        "actorFilter"    : ""
+    };
+
+    function onMount( required struct params = {} ){
+        data.projectId      = arguments.params.projectId      ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+    }
+
+    function events(){
+        if ( !len( data.projectId ) ) return [];
+        return projectEventService.listForProject(
+            projectId : data.projectId,
+            filter    : { actorType : data.actorFilter ?: "" }
+        );
+    }
+
+}

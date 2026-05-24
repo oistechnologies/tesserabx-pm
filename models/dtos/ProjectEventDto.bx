@@ -1,0 +1,38 @@
+/**
+ * ProjectEventDto: snake-case shape for pm_project_events rows on
+ * the wire. Matches the column naming of other PM DTOs so REST
+ * clients see a consistent vocabulary.
+ *
+ * `changes` is parsed back from the JSON column so consumers
+ * receive a struct, not a string.
+ */
+class singleton=true {
+
+    public struct function fromEvent( required any e ){
+        var changes = {};
+        var raw = arguments.e.getChangesJson() ?: "";
+        if ( len( raw ) ) {
+            try { changes = jsonDeserialize( raw ); }
+            catch ( any err ) { changes = {}; }
+        }
+        return {
+            id              : arguments.e.getId(),
+            project_id      : arguments.e.getProjectId(),
+            organization_id : arguments.e.getOrganizationId(),
+            subject_type    : arguments.e.getSubjectType(),
+            subject_id      : arguments.e.getSubjectId(),
+            actor_type      : arguments.e.getActorType(),
+            actor_id        : arguments.e.getActorId() ?: "",
+            action          : arguments.e.getAction(),
+            changes         : changes,
+            created_at      : isDate( arguments.e.getCreatedAt() ) ? dateTimeFormat( arguments.e.getCreatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromEventArray( required array events ){
+        var out = [];
+        for ( var e in arguments.events ) out.append( fromEvent( e ) );
+        return out;
+    }
+
+}

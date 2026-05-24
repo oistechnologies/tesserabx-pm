@@ -1,0 +1,198 @@
+/**
+ * ProjectEventServiceSpec: CRUD against pm_project_events with
+ * actor-filter coverage.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "ProjectEventService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "ProjectEventService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "record appends a row with all required fields", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var subj = createUUID();
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "project",
+                    subjectId      : subj,
+                    actorType      : "agent",
+                    actorId        : createUUID(),
+                    action         : "test_record",
+                    changes        : { name : ctx.project.getName() }
+                } );
+                var rows = queryExecute(
+                    "SELECT count(*) AS n FROM pm_project_events WHERE subject_id = :sid AND action = 'test_record'",
+                    { sid : subj }
+                );
+                expect( rows.n[ 1 ] ).toBe( 1 );
+            } );
+
+            it( "record stores changes as JSON when non-empty, NULL when empty", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var withChangesId = createUUID();
+                var noChangesId   = createUUID();
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "task",
+                    subjectId      : withChangesId,
+                    actorType      : "agent",
+                    action         : "test_with_changes",
+                    changes        : { assigneeType : "agent", assigneeId : "abc" }
+                } );
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "task",
+                    subjectId      : noChangesId,
+                    actorType      : "system",
+                    action         : "test_no_changes"
+                } );
+                var withRow = queryExecute(
+                    "SELECT changes_json FROM pm_project_events WHERE subject_id = :sid",
+                    { sid : withChangesId }
+                );
+                var noRow = queryExecute(
+                    "SELECT changes_json FROM pm_project_events WHERE subject_id = :sid",
+                    { sid : noChangesId }
+                );
+                expect( len( withRow.changes_json[ 1 ] ?: "" ) ).toBeGT( 0 );
+                expect( noRow.changes_json[ 1 ] ?: "" ).toBe( "" );
+            } );
+
+            it( "rejects an unknown subject type", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.record( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        subjectType    : "unicorn",
+                        subjectId      : createUUID(),
+                        actorType      : "agent",
+                        action         : "x"
+                    } );
+                } ).toThrow( type = "ProjectEventService.InvalidSubject" );
+            } );
+
+            it( "rejects an unknown actor type", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.record( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        subjectType    : "task",
+                        subjectId      : createUUID(),
+                        actorType      : "robot",
+                        action         : "x"
+                    } );
+                } ).toThrow( type = "ProjectEventService.InvalidActor" );
+            } );
+
+            it( "listForProject returns rows newest-first", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "project",
+                    subjectId      : ctx.project.getId(),
+                    actorType      : "agent",
+                    action         : "first"
+                } );
+                sleep( 30 );
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "project",
+                    subjectId      : ctx.project.getId(),
+                    actorType      : "agent",
+                    action         : "second"
+                } );
+                var rows = variables.svc.listForProject( ctx.project.getId() );
+                expect( arrayLen( rows ) ).toBeGTE( 2 );
+                expect( rows[ 1 ].getAction() ).toBe( "second" );
+                expect( rows[ 2 ].getAction() ).toBe( "first" );
+            } );
+
+            it( "actorType filter narrows by actor family", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "project",
+                    subjectId      : ctx.project.getId(),
+                    actorType      : "agent",
+                    action         : "by_agent"
+                } );
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "project",
+                    subjectId      : ctx.project.getId(),
+                    actorType      : "contact",
+                    action         : "by_contact"
+                } );
+                var agentOnly = variables.svc.listForProject( ctx.project.getId(), { actorType : "agent" } );
+                expect( arrayLen( agentOnly ) ).toBe( 1 );
+                expect( agentOnly[ 1 ].getAction() ).toBe( "by_agent" );
+
+                var contactOnly = variables.svc.listForProject( ctx.project.getId(), { actorType : "contact" } );
+                expect( arrayLen( contactOnly ) ).toBe( 1 );
+                expect( contactOnly[ 1 ].getAction() ).toBe( "by_contact" );
+            } );
+
+            it( "listForSubject scopes to a single subject", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var taskId = createUUID();
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "task",
+                    subjectId      : taskId,
+                    actorType      : "agent",
+                    action         : "task_created"
+                } );
+                variables.svc.record( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    subjectType    : "task",
+                    subjectId      : createUUID(),
+                    actorType      : "agent",
+                    action         : "task_created"
+                } );
+                var hits = variables.svc.listForSubject( "task", taskId );
+                expect( arrayLen( hits ) ).toBe( 1 );
+            } );
+
+        } );
+    }
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pev-" & createUUID(), slug : "pev-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "pev-" & createUUID() } );
+        return { orgId : orgId, project : project };
+    }
+
+}

@@ -27,6 +27,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.apiResources = variables.wb.getInstance( "ApiResourceRegistry@api" );
         variables.assetService     = variables.wb.getInstance( "AddonAssetService@core" );
         variables.webhookRegistry  = variables.wb.getInstance( "WebhookEventRegistry@api" );
+        variables.auditService     = variables.wb.getInstance( "AuditService@audit" );
     }
 
     function run(){
@@ -290,6 +291,25 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( desc.type      ).toBe( "string" );
                 expect( desc.perTenant ).toBeTrue();
                 expect( desc.secret    ).toBeFalse();
+            } );
+
+            // ---- Phase 4b: domain timeline + audit event types.
+
+            it( "binds ProjectEventService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "ProjectEventService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds ProjectEventDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "ProjectEventDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the five PM compliance audit event types", function(){
+                var types = variables.auditService.listEventTypes();
+                expect( types ).toInclude( "tesserabx-pm.project_created" );
+                expect( types ).toInclude( "tesserabx-pm.project_archived" );
+                expect( types ).toInclude( "tesserabx-pm.project_deleted" );
+                expect( types ).toInclude( "tesserabx-pm.task_assigned_to_contact" );
+                expect( types ).toInclude( "tesserabx-pm.template_applied" );
             } );
 
             // Phase 2+ probes are appended below as registries are

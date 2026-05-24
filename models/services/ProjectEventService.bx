@@ -1,0 +1,118 @@
+/**
+ * ProjectEventService: writes and reads PM's domain timeline.
+ *
+ * Rows live in pm_project_events. The ProjectEventLogger
+ * interceptor calls record(...) from listeners on every PM
+ * lifecycle event (onPmTaskCreated, onPmTaskAssigned, ...) so the
+ * service stays a passive CRUD surface; the interceptor owns event
+ * translation. listForProject/listForSubject power the timeline
+ * CBWires.
+ *
+ * action vocabulary is "<noun>_<verb>" (e.g. "task_created",
+ * "task_status_changed", "comment_added"). Derived by stripping
+ * the "onPm" prefix from the event name and snake_casing.
+ *
+ * changes_json carries the canonical envelope's metadata struct
+ * unchanged. Downstream readers (the feed CBWires) can render
+ * specific keys per-action.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_SUBJECT_TYPES = [ "project", "task", "subtask", "comment" ];
+    variables.VALID_ACTOR_TYPES   = [ "agent", "contact", "system" ];
+
+    /**
+     * Append a row. Returns the new event id (string).
+     *
+     * Required: projectId, organizationId, subjectType, subjectId,
+     *           actorType, action.
+     * Optional: actorId, changes (struct).
+     *
+     * Uses raw queryExecute instead of the Quick entity because the
+     * announce thread does not initialize Quick's column metadata
+     * (CLAUDE.md "CFML Logging From Non-Request JVM Threads" note),
+     * and we want this service to be safe to call from either path.
+     */
+    public string function record( required struct data ){
+        if ( !len( arguments.data.projectId      ?: "" ) ) throw( type = "ProjectEventService.MissingField", message = "projectId is required." );
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "ProjectEventService.MissingField", message = "organizationId is required." );
+        if ( !len( arguments.data.subjectType    ?: "" ) ) throw( type = "ProjectEventService.MissingField", message = "subjectType is required." );
+        if ( !len( arguments.data.subjectId      ?: "" ) ) throw( type = "ProjectEventService.MissingField", message = "subjectId is required." );
+        if ( !len( arguments.data.actorType      ?: "" ) ) throw( type = "ProjectEventService.MissingField", message = "actorType is required." );
+        if ( !len( arguments.data.action         ?: "" ) ) throw( type = "ProjectEventService.MissingField", message = "action is required." );
+
+        if ( !arrayContains( variables.VALID_SUBJECT_TYPES, arguments.data.subjectType ) ) {
+            throw( type = "ProjectEventService.InvalidSubject", message = "subjectType must be one of #arrayToList( variables.VALID_SUBJECT_TYPES )# (got [#arguments.data.subjectType#])." );
+        }
+        if ( !arrayContains( variables.VALID_ACTOR_TYPES, arguments.data.actorType ) ) {
+            throw( type = "ProjectEventService.InvalidActor", message = "actorType must be one of #arrayToList( variables.VALID_ACTOR_TYPES )# (got [#arguments.data.actorType#])." );
+        }
+
+        var id        = createUUID();
+        var actorId   = len( arguments.data.actorId ?: "" ) ? arguments.data.actorId : "";
+        var changeStr = structIsEmpty( arguments.data.changes ?: {} ) ? "" : jsonSerialize( arguments.data.changes );
+
+        queryExecute(
+            "INSERT INTO pm_project_events
+                ( id, project_id, organization_id, subject_type, subject_id,
+                  actor_type, actor_id, action, changes_json, created_at )
+             VALUES
+                ( :id, :projectId, :organizationId, :subjectType, :subjectId,
+                  :actorType, NULLIF( :actorId, '' ), :action, NULLIF( :changes, '' ), CURRENT_TIMESTAMP )",
+            {
+                id             : id,
+                projectId      : arguments.data.projectId,
+                organizationId : arguments.data.organizationId,
+                subjectType    : arguments.data.subjectType,
+                subjectId      : arguments.data.subjectId,
+                actorType      : arguments.data.actorType,
+                actorId        : actorId,
+                action         : arguments.data.action,
+                changes        : changeStr
+            }
+        );
+        return id;
+    }
+
+    /**
+     * Project-level feed. Optional filter.actorType narrows to a
+     * single actor family. Results are ordered newest-first and
+     * capped at 200 rows to keep the wire payload bounded.
+     */
+    public array function listForProject( required string projectId, struct filter = {} ){
+        var q = wirebox.getInstance( "ProjectEvent@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId );
+        applyActorFilter( q, arguments.filter );
+        return q.orderBy( "created_at", "desc" ).limit( 200 ).get();
+    }
+
+    /**
+     * Subject-scoped feed (task / subtask / comment timeline).
+     * Used by TaskEventFeed CBWire.
+     */
+    public array function listForSubject(
+        required string subjectType,
+        required string subjectId,
+        struct filter = {}
+    ){
+        var q = wirebox.getInstance( "ProjectEvent@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "subject_type", arguments.subjectType )
+            .where( "subject_id",   arguments.subjectId );
+        applyActorFilter( q, arguments.filter );
+        return q.orderBy( "created_at", "desc" ).limit( 200 ).get();
+    }
+
+    // ---------- internals ----------
+
+    private void function applyActorFilter( required any builder, required struct filter ){
+        var t = arguments.filter.actorType ?: "";
+        if ( !len( t ) ) return;
+        if ( !arrayContains( variables.VALID_ACTOR_TYPES, t ) ) return;
+        arguments.builder.where( "actor_type", t );
+    }
+
+}

@@ -171,6 +171,11 @@ class singleton=true {
                     assigneeId   : task.getAssigneeId()
                 }
             );
+            auditAssignmentToContact(
+                task      : task,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: ""
+            );
             try {
                 watcherService.autoWatchOnAssignment(
                     watchableType  : "task",
@@ -311,6 +316,11 @@ class singleton=true {
                     assigneeType : task.getAssigneeType() ?: "",
                     assigneeId   : task.getAssigneeId()   ?: ""
                 }
+            );
+            auditAssignmentToContact(
+                task      : task,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: ""
             );
             if ( len( task.getAssigneeId() ?: "" ) ) {
                 try {
@@ -573,7 +583,7 @@ class singleton=true {
         required string actorType,
         required string actorId,
         struct metadata     = {},
-        boolean async       = true
+        boolean async       = false
     ){
         try {
             interceptorService.announce(
@@ -591,6 +601,42 @@ class singleton=true {
         } catch ( any e ) {
             writeLog(
                 text : "TaskService.announceLifecycleEvent failed for [#arguments.eventName#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * Compliance audit when a task lands on a Contact assignee.
+     * Fires inline in createTask / updateTask after the assignment
+     * is persisted. Phase 4b ships this as the only PM event the
+     * BUILD-PLAN explicitly calls out for AuditService routing
+     * outside of the project lifecycle ones already in ProjectService.
+     */
+    private void function auditAssignmentToContact(
+        required any task,
+        required string actorType,
+        required string actorId
+    ){
+        if ( ( arguments.task.getAssigneeType() ?: "" ) != "contact" ) return;
+        try {
+            auditService.record(
+                eventType      : "tesserabx-pm.task_assigned_to_contact",
+                source         : "tesserabx-pm",
+                organizationId : arguments.task.getOrganizationId() ?: "",
+                actorType      : arguments.actorType,
+                actorId        : arguments.actorId,
+                entityType     : "Task",
+                entityId       : arguments.task.getId(),
+                metadata       : {
+                    assigneeId : arguments.task.getAssigneeId(),
+                    title      : arguments.task.getTitle()
+                }
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TaskService.auditAssignmentToContact failed for task [#arguments.task.getId()#]: #e.message#",
                 log  : "tesserabx",
                 type : "warning"
             );

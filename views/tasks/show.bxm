@@ -66,6 +66,16 @@
 				)#
 			</div>
 
+			<div class="mt-3">
+				#wire(
+					name   = "TaskEventFeed@tesserabx-pm",
+					params = {
+						taskId         : local.t.getId(),
+						organizationId : local.t.getOrganizationId()
+					}
+				)#
+			</div>
+
 			<div class="card mt-3">
 				<div class="card-body">
 					<div class="d-flex justify-content-between align-items-center mb-2">

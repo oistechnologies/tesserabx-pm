@@ -57,7 +57,8 @@ class {
                 contributesTo  : [
                     "permissions", "roles", "navigation",
                     "adminPages", "settings", "routeClaims",
-                    "apiResources", "webhookEvents", "assets"
+                    "apiResources", "webhookEvents", "assets",
+                    "auditEvents"
                 ],
                 requiresAi     : false,
 
@@ -232,9 +233,20 @@ class {
                     { id : "pm.subtasks.delete",   method : "DELETE", path : "/api/v1/pm/subtasks/:id",            version : "v1", handler : "api.v1.Subtasks", action : "remove", summary : "Soft-delete a PM subtask.",          requiresAuth : true, requiredPermission : "pm.delete" }
                 ],
 
-                // Phase 4: audit event types, project event timeline,
-                // and the canonical event envelopes PM announces.
-                auditEvents             : [],
+                // Phase 4b: audit event types written to AuditService
+                // for compliance. ProjectService writes project_created /
+                // project_archived / project_deleted inline; TaskService
+                // writes task_assigned_to_contact when an assignee lands
+                // on a Contact account. template_applied is declared so
+                // the dropdown surfaces it ahead of Phase 7's
+                // TemplateService, even though no PM code fires it yet.
+                auditEvents : [
+                    { type : "tesserabx-pm.project_created",          label : "PM: project created",            severity : "info"    },
+                    { type : "tesserabx-pm.project_archived",         label : "PM: project archived",           severity : "info"    },
+                    { type : "tesserabx-pm.project_deleted",          label : "PM: project deleted",            severity : "warning" },
+                    { type : "tesserabx-pm.task_assigned_to_contact", label : "PM: task assigned to a contact", severity : "info"    },
+                    { type : "tesserabx-pm.template_applied",         label : "PM: template applied",           severity : "info"    }
+                ],
                 // Outbound webhook event keys PM announces through
                 // EventPayloadBuilder@core. Phase 4a ships the
                 // comment-side declarations and the task/project
@@ -288,8 +300,37 @@ class {
         };
 
         variables.routes              = [];
-        variables.interceptorSettings = { customInterceptionPoints : [] };
-        variables.interceptors        = [];
+        // Custom interception points PM announces. Listeners (PM's
+        // own ProjectEventLogger plus any future host modules and
+        // third-party add-ons) only auto-register if the point is
+        // declared up-front. The shape mirrors modules_app/tickets/
+        // ModuleConfig.bx.
+        variables.interceptorSettings = { customInterceptionPoints : [
+            "onPmProjectCreated",
+            "onPmProjectArchived",
+            "onPmTaskCreated",
+            "onPmTaskAssigned",
+            "onPmTaskStatusChanged",
+            "onPmTaskCompleted",
+            "onPmSubtaskCreated",
+            "onPmSubtaskCompleted",
+            "onPmCommentAdded",
+            "onPmMentioned"
+        ] };
+        variables.interceptors        = [
+            // Phase 4b: appends to pm_project_events for every PM
+            // lifecycle event announced by the services. Listens to
+            // onPmProjectCreated / onPmProjectArchived /
+            // onPmTaskCreated / onPmTaskAssigned /
+            // onPmTaskStatusChanged / onPmTaskCompleted /
+            // onPmSubtaskCreated / onPmSubtaskCompleted /
+            // onPmCommentAdded.
+            {
+                class      : "#moduleMapping#.interceptors.ProjectEventLogger",
+                name       : "ProjectEventLogger",
+                properties : {}
+            }
+        ];
     }
 
     function onLoad(){
@@ -321,6 +362,9 @@ class {
         binder.map( "WatcherService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.WatcherService" )
               .asSingleton();
+        binder.map( "ProjectEventService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.ProjectEventService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -334,6 +378,9 @@ class {
               .asSingleton();
         binder.map( "CommentDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.CommentDto" )
+              .asSingleton();
+        binder.map( "ProjectEventDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.ProjectEventDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

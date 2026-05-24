@@ -213,7 +213,7 @@ class singleton=true {
                         is_internal      : !!arguments.comment.getIsInternal()
                     }
                 ),
-                true
+                false
             );
         } catch ( any e ) {
             writeLog(

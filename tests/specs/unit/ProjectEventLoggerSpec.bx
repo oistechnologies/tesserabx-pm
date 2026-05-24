@@ -1,0 +1,193 @@
+/**
+ * ProjectEventLoggerSpec: end-to-end test that the interceptor is
+ * registered and that every PM lifecycle event lands a row in
+ * pm_project_events. Implicitly covers the announcement side of
+ * each service.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.subtaskSvc = variables.wb.getInstance( "SubtaskService@tesserabx-pm" );
+        variables.commentSvc = variables.wb.getInstance( "CommentService@tesserabx-pm" );
+        variables.statusSvc  = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+        variables.eventSvc   = variables.wb.getInstance( "ProjectEventService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "ProjectEventLogger@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                // Async PM event listeners may still be in flight when
+                // the test body returns. A brief pause lets them write
+                // before cascade-delete removes the project they
+                // reference; otherwise the listener's INSERT trips
+                // fk_pm_project_events_project_id.
+                sleep( 200 );
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "writes a project_created row when a project is created", function(){
+                var ctx = setupOrg( fixtureOrgIds );
+                var project = variables.projectSvc.createProject( {
+                    organizationId : ctx.orgId,
+                    name           : "pel-" & createUUID(),
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                expect( waitForProjectAction( project.getId(), "project_created" ) ).toBeTrue();
+            } );
+
+            it( "writes a task_created row when a task is created", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var task = variables.taskSvc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "logger-task",
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                expect( waitForSubjectAction( "task", task.getId(), "task_created" ) ).toBeTrue();
+            } );
+
+            it( "writes task_assigned + task_status_changed when those fire", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var task = variables.taskSvc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "logger-flow",
+                    assigneeType   : "agent",
+                    assigneeId     : createUUID(),
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                expect( waitForSubjectAction( "task", task.getId(), "task_assigned" ) ).toBeTrue();
+
+                var statuses = variables.statusSvc.listForProject( ctx.project.getId() );
+                expect( arrayLen( statuses ) ).toBeGT( 1, "Project must seed multiple statuses for a transition" );
+                // createTask defaulted the task into statuses[1] (the
+                // is_default Backlog), so transition to statuses[2] to
+                // actually cross a boundary.
+                variables.taskSvc.updateTask(
+                    id   : task.getId(),
+                    data : {
+                        statusId  : statuses[ 2 ].getId(),
+                        actorType : "agent",
+                        actorId   : createUUID()
+                    }
+                );
+                // status_changed is announced sync, so no wait window.
+                expect( waitForSubjectAction( "task", task.getId(), "task_status_changed" ) ).toBeTrue();
+            } );
+
+            it( "writes a subtask_created row when a subtask is created", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var task = variables.taskSvc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "parent",
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                var sub = variables.subtaskSvc.createSubtask( {
+                    taskId         : task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "sub-1",
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                expect( waitForSubjectAction( "subtask", sub.getId(), "subtask_created" ) ).toBeTrue();
+            } );
+
+            it( "writes a comment_added row against the commentable subject (task)", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var task = variables.taskSvc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "commented",
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                variables.commentSvc.createComment( {
+                    commentableType : "task",
+                    commentableId   : task.getId(),
+                    organizationId  : ctx.orgId,
+                    authorType      : "agent",
+                    authorId        : createUUID(),
+                    body            : "logged"
+                } );
+                expect( waitForSubjectAction( "task", task.getId(), "comment_added" ) ).toBeTrue();
+            } );
+
+        } );
+    }
+
+    /**
+     * Most PM lifecycle events fire async. Poll the event service
+     * for up to 5s waiting for the expected action to land.
+     */
+    private boolean function waitForProjectAction(
+        required string projectId,
+        required string action,
+        numeric timeoutMs = 5000
+    ){
+        var deadline = getTickCount() + arguments.timeoutMs;
+        while ( getTickCount() < deadline ) {
+            var rows = variables.eventSvc.listForProject( arguments.projectId );
+            for ( var r in rows ) {
+                if ( r.getAction() == arguments.action ) return true;
+            }
+            sleep( 50 );
+        }
+        return false;
+    }
+
+    private boolean function waitForSubjectAction(
+        required string subjectType,
+        required string subjectId,
+        required string action,
+        numeric timeoutMs = 5000
+    ){
+        var deadline = getTickCount() + arguments.timeoutMs;
+        while ( getTickCount() < deadline ) {
+            var rows = variables.eventSvc.listForSubject( arguments.subjectType, arguments.subjectId );
+            for ( var r in rows ) {
+                if ( r.getAction() == arguments.action ) return true;
+            }
+            sleep( 50 );
+        }
+        return false;
+    }
+
+    private struct function setupOrg( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pel-" & createUUID(), slug : "pel-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        return { orgId : orgId };
+    }
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var ctx = setupOrg( arguments.fixtureOrgIds );
+        var project = variables.projectSvc.createProject( {
+            organizationId : ctx.orgId,
+            name           : "pel-" & createUUID(),
+            actorType      : "agent",
+            actorId        : createUUID()
+        } );
+        return { orgId : ctx.orgId, project : project };
+    }
+
+}
