@@ -1,0 +1,167 @@
+name: ci
+
+# tesserabx-pm CI.
+#
+# PM is a TesseraBX add-on; it has no standalone runtime. Every test
+# runs against a checked-out copy of the host TesseraBX repo with PM
+# dropped into modules/tesserabx-pm/. Postgres (with pgvector) and
+# Redis come from GitHub Actions service containers, matching the
+# host's own ci.yaml.
+#
+# Until the host begins tagging releases (its appVersion is 0.0.1
+# and no tags exist yet), TESSERABX_HOST_REF below is a pinned
+# commit SHA on the host's main branch. Bump it when PM is ready to
+# rebase onto a newer host snapshot.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  COMMANDBOX_VERSION: 6.x
+  BOXLANG_VERSION: 1
+  TZ: UTC
+  TESSERABX_HOST_REPO: oistechnologies/tesserabx
+  TESSERABX_HOST_REF: ada629a375a288c46e0cc7f1d57fc5785562f948
+
+jobs:
+
+  test:
+    name: TestBox specs (against host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: tesserabx_test
+          POSTGRES_USER: tesserabx
+          POSTGRES_PASSWORD: tesserabx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tesserabx -d tesserabx_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Check out tesserabx-pm
+        uses: actions/checkout@v4
+        with:
+          path: pm
+
+      - name: Check out tesserabx host (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TESSERABX_HOST_REPO }}
+          ref:        ${{ env.TESSERABX_HOST_REF }}
+          path: host
+
+      - name: Mount PM into host modules/ directory
+        # The host's runner discovers add-on migrations under
+        # modules/<addon>/migrations and an add-on's ModuleConfig.bx
+        # at modules/<addon>/ChainConfig.bx; symlinking the PM
+        # checkout into the host tree gives the host exactly the
+        # layout it expects without copying files around.
+        run: |
+          mkdir -p host/modules
+          ln -s "$GITHUB_WORKSPACE/pm" "$GITHUB_WORKSPACE/host/modules/tesserabx-pm"
+          ls -la host/modules/tesserabx-pm
+
+      - name: Set up CommandBox
+        uses: Ortus-Solutions/setup-commandbox@v2.0.1
+
+      - name: Install host CommandBox dependencies
+        working-directory: host
+        run: box install
+
+      - name: Stage and run migrations
+        working-directory: host
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_NAME: tesserabx_test
+          DB_USER: tesserabx
+          DB_PASSWORD: tesserabx
+          DB_SSL: "false"
+          DB_SCHEMA: public
+        run: |
+          # tasks/Migrate stage copies every add-on migration
+          # (modules/<addon>/migrations included) into
+          # resources/database/migrations/ with the host's
+          # _addon-<slug>_ prefix so the cfmigrations runner picks
+          # them up. PM ships no migrations at Phase 0; the stage
+          # step is still required so any host fixtures or future
+          # PM migrations land correctly.
+          box task run tasks/Migrate stage
+          box migrate install
+          box migrate up --force
+
+      - name: Start CommandBox server
+        working-directory: host
+        env:
+          PORT: 8080
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_NAME: tesserabx_test
+          DB_USER: tesserabx
+          DB_PASSWORD: tesserabx
+          DB_SSL: "false"
+          DB_SCHEMA: public
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          ENVIRONMENT: ci
+          BOX_SERVER_PROFILE: production
+          AI_ENABLED: "false"
+          CBFS_DEFAULT_PROVIDER: local
+        run: |
+          box server start console=false openBrowser=false
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "Host app is healthy."
+              break
+            fi
+            if [ "$i" = "90" ]; then
+              echo "Host app failed to come up. Dumping server log."
+              box server log || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Run TestBox specs
+        working-directory: host
+        # The host runner (tests/runner.bxm) auto-discovers specs
+        # under modules/<addon>/tests/specs when the add-on's
+        # ModuleConfig.bx declares settings.tesserabx (host commit
+        # d543a82). PM's InstallSpec is picked up automatically;
+        # no explicit directory= override needed.
+        run: box testbox run reporter=text outputFile=tests/results/testbox-pm.txt
+
+      - name: Stop CommandBox server
+        if: always()
+        working-directory: host
+        run: box server stop || true
+
+      - name: Upload PM test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testbox-pm-report
+          path: host/tests/results/
+          if-no-files-found: ignore
