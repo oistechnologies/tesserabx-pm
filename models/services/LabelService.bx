@@ -1,0 +1,167 @@
+/**
+ * LabelService: per-project label CRUD + task <-> label attach/detach.
+ *
+ * Labels live under a single project (BUILD-PLAN §3.16). The unique
+ * constraint pm_labels(project_id, name) means each project keeps
+ * its own set; renaming inside a project is fine, cross-project
+ * collisions never happen.
+ *
+ * Task attach / detach goes through pm_task_labels. The join table
+ * has no tenant column; tenant protection lives on the Task and
+ * Label sides (we re-fetch through Quick when we need org scope).
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    // ---------------- Reads ----------------
+
+    public any function getLabel( required string id ){
+        var l = wirebox.getInstance( "Label@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( l ) ? javaCast( "null", "" ) : l;
+    }
+
+    public array function listForProject( required string projectId ){
+        return wirebox.getInstance( "Label@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId )
+            .orderBy( "sort_order", "asc" )
+            .orderBy( "name",       "asc" )
+            .get();
+    }
+
+    /**
+     * Resolve the label ids currently attached to a task. Used by
+     * the LabelPicker wire to seed its selection on mount and by
+     * the BoardService filter.
+     */
+    public array function labelIdsForTask( required string taskId ){
+        var rows = queryExecute(
+            "SELECT label_id FROM pm_task_labels WHERE task_id = :tid",
+            { tid : arguments.taskId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.label_id[ i ] );
+        return out;
+    }
+
+    /**
+     * Hydrate the Label entities a task wears. Skips the join walk
+     * for the UI which usually wants name + color, not the join row.
+     */
+    public array function labelsForTask( required string taskId ){
+        var ids = labelIdsForTask( arguments.taskId );
+        if ( !arrayLen( ids ) ) return [];
+        return wirebox.getInstance( "Label@tesserabx-pm" )
+            .withoutGlobalScope()
+            .whereIn( "id", ids )
+            .orderBy( "sort_order", "asc" )
+            .orderBy( "name",       "asc" )
+            .get();
+    }
+
+    // ---------------- Mutations ----------------
+
+    public any function createLabel( required struct data ){
+        if ( !len( arguments.data.projectId      ?: "" ) ) throw( type = "LabelService.MissingField", message = "projectId is required." );
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "LabelService.MissingField", message = "organizationId is required." );
+        if ( !len( arguments.data.name           ?: "" ) ) throw( type = "LabelService.MissingField", message = "name is required." );
+
+        if ( labelExistsByName( arguments.data.projectId, arguments.data.name ) ) {
+            throw( type = "LabelService.DuplicateName", message = "A label named [#arguments.data.name#] already exists on this project." );
+        }
+
+        var label = wirebox.getInstance( "Label@tesserabx-pm" );
+        label.setId(             createUUID() );
+        label.setProjectId(      arguments.data.projectId );
+        label.setOrganizationId( arguments.data.organizationId );
+        label.setName(           arguments.data.name );
+        label.setColor(          len( arguments.data.color ?: "" ) ? arguments.data.color : javaCast( "null", "" ) );
+        label.setSortOrder(      int( val( arguments.data.sortOrder ?: 0 ) ) );
+        label.save();
+        return label;
+    }
+
+    public any function updateLabel( required string id, required struct data ){
+        var label = getLabel( arguments.id );
+        if ( isNull( label ) ) throw( type = "LabelService.UnknownLabel", message = "No label with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "name" ) ) {
+            var newName = trim( arguments.data.name );
+            if ( !len( newName ) ) throw( type = "LabelService.MissingField", message = "name cannot be blank." );
+            if ( newName != label.getName() && labelExistsByName( label.getProjectId(), newName ) ) {
+                throw( type = "LabelService.DuplicateName", message = "A label named [#newName#] already exists on this project." );
+            }
+            label.setName( newName );
+        }
+        if ( structKeyExists( arguments.data, "color" )     ) label.setColor(     len( arguments.data.color ) ? arguments.data.color : javaCast( "null", "" ) );
+        if ( structKeyExists( arguments.data, "sortOrder" ) ) label.setSortOrder( int( val( arguments.data.sortOrder ) ) );
+        label.save();
+        return label;
+    }
+
+    public any function removeLabel( required string id ){
+        var label = getLabel( arguments.id );
+        if ( isNull( label ) ) throw( type = "LabelService.UnknownLabel", message = "No label with id [#arguments.id#]." );
+        // Hard delete here (no soft-delete column on pm_labels).
+        // FK cascade on pm_task_labels removes the join rows.
+        queryExecute( "DELETE FROM pm_labels WHERE id = :id", { id : arguments.id } );
+        return label;
+    }
+
+    // ---------------- Task attach / detach ----------------
+
+    public void function attachToTask( required string taskId, required string labelId ){
+        // Idempotent: the (task_id, label_id) UNIQUE constraint
+        // catches a duplicate. INSERT...ON CONFLICT DO NOTHING is
+        // the cleanest path on Postgres.
+        queryExecute(
+            "INSERT INTO pm_task_labels ( id, task_id, label_id, created_at )
+             VALUES ( :id, :tid, :lid, CURRENT_TIMESTAMP )
+             ON CONFLICT ( task_id, label_id ) DO NOTHING",
+            {
+                id  : createUUID(),
+                tid : arguments.taskId,
+                lid : arguments.labelId
+            }
+        );
+    }
+
+    public void function detachFromTask( required string taskId, required string labelId ){
+        queryExecute(
+            "DELETE FROM pm_task_labels WHERE task_id = :tid AND label_id = :lid",
+            { tid : arguments.taskId, lid : arguments.labelId }
+        );
+    }
+
+    /**
+     * Replace the full label set for a task in one call. Used by the
+     * LabelPicker wire's "save" path so a multi-select edit lands
+     * as a single sync.
+     */
+    public void function syncTaskLabels( required string taskId, required array labelIds ){
+        var current = labelIdsForTask( arguments.taskId );
+        var want    = arguments.labelIds;
+
+        for ( var lid in want ) {
+            if ( !arrayContains( current, lid ) ) attachToTask( arguments.taskId, lid );
+        }
+        for ( var lid in current ) {
+            if ( !arrayContains( want, lid ) ) detachFromTask( arguments.taskId, lid );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private boolean function labelExistsByName( required string projectId, required string name ){
+        var r = queryExecute(
+            "SELECT COUNT(*) AS n FROM pm_labels WHERE project_id = :pid AND lower( name ) = lower( :n )",
+            { pid : arguments.projectId, n : arguments.name }
+        );
+        return r.n[ 1 ] > 0;
+    }
+
+}

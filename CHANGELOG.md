@@ -6,6 +6,21 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 6a: Labels
+
+- `LabelService@tesserabx-pm` ships per-project label CRUD plus task attach/detach. `pm_labels(project_id, name)` is unique so the same name can repeat across projects but never within one. Hard delete on `removeLabel` (no soft-delete column on `pm_labels`); the `pm_task_labels` FK cascade removes attached joins. `attachToTask` uses `INSERT ... ON CONFLICT DO NOTHING` for idempotency; `syncTaskLabels(taskId, labelIds)` reconciles attach + detach in a single call so the picker can save a multi-select with one wire action.
+- New CBWires:
+  - `LabelManager@tesserabx-pm` at `/agent/pm/projects/:projectId/labels`. Inline add + rename + recolor + delete UI, with the unique-name error surfaced as a wire notice.
+  - `LabelPicker@tesserabx-pm` embedded on the task detail page. Chip-style multi-select; clicking a chip toggles attach/detach immediately via `syncTaskLabels`. Each chip uses the label's color when selected. "Manage" link jumps to the project's label admin page.
+- `BoardService.buildBoard` and `buildColumn` accept a `labelIds` filter; results narrow to tasks that wear at least one of the supplied labels (OR semantics across the selection). Filtering happens in a single batched query against `pm_task_labels` after the task list is fetched, so the kanban path stays O(tasks-in-project) regardless of label cardinality. The board result also carries a `labelsByTask` map (one batched join, returning `{ id, name, color }` per attached label) so the kanban card template can render label chips inline without N+1.
+- Kanban TaskCards render attached labels as a small pill-style row above the metadata line, using each label's color. Hidden when a task has no labels.
+- `KanbanBoard` wire gains a `labelIds` array in `data` (queryString-persisted) and a `toggleLabel(labelId)` action; the template renders a chip-row label filter under the search/priority/assignee row, hidden when the project has no labels defined.
+- Project show page gains a "Manage labels" entry-point card with a direct link to the project's label admin.
+- New handler / view / route: `handlers/Labels.bx`, `views/labels/index.bxm`, and `route("projects/:projectId/labels").to("Labels.index")` in `config/Router.bx`.
+- New DTO: `LabelDto@tesserabx-pm` with `fromLabel` / `fromLabelArray`. New contract: `ILabelService@tesserabx-pm`.
+- New test bundle `LabelServiceSpec` (8 specs): create, duplicate-name reject (case-insensitive, scoped per project), cross-project name reuse, rename with re-check, hard delete cascades the join, idempotent attach, `syncTaskLabels` add+remove reconciliation, hydrated `labelsForTask`. `InstallSpec` adds 2 new probes (LabelService binding, LabelDto binding). 43 specs total in InstallSpec.
+- Deferred to Phase 6b and beyond: inline label assignment from the kanban TaskDetail offcanvas (assignment happens from the task show page picker today).
+
 ### Phase 5: Time Tracking
 
 - `TimeTrackingService@tesserabx-pm` ships polymorphic time-log CRUD over Task and Subtask (`loggable_type` + `loggable_id`) and over Agent / Contact (`user_type` + `user_id`). `createTimeLog` enforces the BUILD-PLAN §3.7 per-project opt-in: it walks from the loggable up to the owning project and refuses if `pm_projects.time_tracking_enabled = false`, throwing `TimeTrackingService.TrackingDisabled` so the wire can render a clear message. Soft-delete via `deleted_at`.

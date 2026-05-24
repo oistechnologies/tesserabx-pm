@@ -1,0 +1,28 @@
+/**
+ * Agent-surface Labels handler. Single action mounts the
+ * LabelManager CBWire scoped to a project.
+ *
+ * Route: /agent/pm/projects/:projectId/labels
+ */
+class {
+
+    property name="projectService" inject="ProjectService@tesserabx-pm";
+    property name="messagebox"     inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = "Labels — " & project.getName();
+        prc.project   = project;
+        event.setView( view = "labels/index", module = "tesserabx-pm" );
+    }
+
+}

@@ -60,12 +60,14 @@ class singleton=true {
             search       = safeFilters.search,
             limit        = 500
         );
+        tasks = applyLabelFilter( tasks, safeFilters.labelIds );
 
         return {
-            statuses    : statuses,
-            columns     : groupTasks( tasks, statuses ),
-            totalTasks  : arrayLen( tasks ),
-            filters     : safeFilters
+            statuses     : statuses,
+            columns      : groupTasks( tasks, statuses ),
+            totalTasks   : arrayLen( tasks ),
+            filters      : safeFilters,
+            labelsByTask : labelsForTasks( tasks )
         };
     }
 
@@ -92,11 +94,13 @@ class singleton=true {
             search       = safeFilters.search,
             limit        = 500
         );
+        tasks = applyLabelFilter( tasks, safeFilters.labelIds );
         var status = projectStatusService.getStatus( arguments.statusId );
         return {
-            status  : isNull( status ) ? "" : status,
-            tasks   : tasks,
-            filters : safeFilters
+            status       : isNull( status ) ? "" : status,
+            tasks        : tasks,
+            filters      : safeFilters,
+            labelsByTask : labelsForTasks( tasks )
         };
     }
 
@@ -104,13 +108,98 @@ class singleton=true {
 
     private struct function normalizeFilters( required any filters ){
         var f = isStruct( arguments.filters ) ? arguments.filters : {};
+        var rawLabels = f.labelIds ?: [];
+        var labelIds  = [];
+        if ( isArray( rawLabels ) ) {
+            for ( var lid in rawLabels ) {
+                if ( isSimpleValue( lid ) && len( lid ) ) labelIds.append( lid );
+            }
+        } else if ( isSimpleValue( rawLabels ) && len( rawLabels ) ) {
+            // wire:model on a multi-select can hand a comma-joined
+            // string when only one option is picked on certain
+            // browsers; tolerate it.
+            for ( var lid in listToArray( rawLabels, "," ) ) {
+                if ( len( trim( lid ) ) ) labelIds.append( trim( lid ) );
+            }
+        }
         return {
             statusId     : trim( f.statusId     ?: "" ),
             assigneeType : trim( f.assigneeType ?: "" ),
             assigneeId   : trim( f.assigneeId   ?: "" ),
             priority     : trim( f.priority     ?: "" ),
-            search       : trim( f.search       ?: "" )
+            search       : trim( f.search       ?: "" ),
+            labelIds     : labelIds
         };
+    }
+
+    /**
+     * Batch-fetch the labels attached to every task in the result
+     * set. Returns a struct keyed by task_id mapping to an array of
+     * `{ id, name, color }` structs (kept light so the template
+     * does not need entity getters and JSON serialisation stays
+     * cheap). One indexed join, regardless of task or label
+     * cardinality.
+     */
+    private struct function labelsForTasks( required array tasks ){
+        var out = {};
+        if ( !arrayLen( arguments.tasks ) ) return out;
+
+        var taskIds = [];
+        for ( var t in arguments.tasks ) {
+            taskIds.append( t.getId() );
+            out[ t.getId() ] = [];
+        }
+
+        var rows = queryExecute(
+            "SELECT tl.task_id, l.id, l.name, l.color, l.sort_order
+             FROM   pm_task_labels tl
+             JOIN   pm_labels      l  ON l.id = tl.label_id
+             WHERE  tl.task_id IN ( :tids )
+             ORDER BY l.sort_order ASC, l.name ASC",
+            { tids : { value : taskIds.toList(), list : true } }
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var tid = rows.task_id[ i ];
+            if ( !structKeyExists( out, tid ) ) continue;
+            out[ tid ].append( {
+                id    : rows.id[ i ],
+                name  : rows.name[ i ],
+                color : rows.color[ i ] ?: ""
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Narrow the task list to tasks that wear at least one of the
+     * supplied label ids. OR semantics, not AND, so a multi-select
+     * widens the result.
+     */
+    private array function applyLabelFilter( required array tasks, required array labelIds ){
+        if ( !arrayLen( arguments.labelIds ) ) return arguments.tasks;
+        if ( !arrayLen( arguments.tasks ) )    return arguments.tasks;
+
+        var taskIds = [];
+        for ( var t in arguments.tasks ) taskIds.append( t.getId() );
+
+        var rows = queryExecute(
+            "SELECT DISTINCT task_id
+             FROM   pm_task_labels
+             WHERE  task_id  IN ( :tids )
+               AND  label_id IN ( :lids )",
+            {
+                tids : { value : taskIds.toList(),            list : true },
+                lids : { value : arguments.labelIds.toList(), list : true }
+            }
+        );
+        var matching = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) matching[ rows.task_id[ i ] ] = true;
+
+        var out = [];
+        for ( var t in arguments.tasks ) {
+            if ( structKeyExists( matching, t.getId() ) ) out.append( t );
+        }
+        return out;
     }
 
     /**

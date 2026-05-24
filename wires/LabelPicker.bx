@@ -1,0 +1,52 @@
+/**
+ * LabelPicker: chip-style multi-select on the task detail page.
+ *
+ * Renders one chip per available label on the parent project;
+ * attached labels are highlighted, unattached are muted. Clicking
+ * a chip toggles attach/detach immediately via syncTaskLabels.
+ *
+ * Embed from views/tasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "LabelPicker@tesserabx-pm",
+ *       params = {
+ *           taskId    : prc.task.getId(),
+ *           projectId : prc.project.getId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="labelService" inject="LabelService@tesserabx-pm";
+
+    data = {
+        "taskId"     : "",
+        "projectId"  : "",
+        "selectedIds": []
+    };
+
+    function onMount( required struct params = {} ){
+        data.taskId    = arguments.params.taskId    ?: "";
+        data.projectId = arguments.params.projectId ?: "";
+        data.selectedIds = labelService.labelIdsForTask( data.taskId );
+    }
+
+    function projectLabels(){
+        if ( !len( data.projectId ) ) return [];
+        return labelService.listForProject( data.projectId );
+    }
+
+    function toggle( labelId ){
+        var lid = arguments.labelId ?: "";
+        if ( !len( lid ) ) return;
+        var next = duplicate( data.selectedIds );
+        if ( arrayContains( next, lid ) ) {
+            arrayDelete( next, lid );
+        } else {
+            next.append( lid );
+        }
+        labelService.syncTaskLabels( data.taskId, next );
+        data.selectedIds = next;
+    }
+
+}

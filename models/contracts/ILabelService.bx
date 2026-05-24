@@ -1,0 +1,28 @@
+/**
+ * ILabelService: documentation contract for the per-project label
+ * service. Cross-module callers code against this interface; the
+ * live binding `LabelService@tesserabx-pm` implements it.
+ *
+ * Methods (live signatures on LabelService):
+ *
+ *   any   getLabel( id )
+ *   array listForProject( projectId )
+ *   array labelIdsForTask( taskId )
+ *   array labelsForTask( taskId )
+ *   any   createLabel( data )
+ *   any   updateLabel( id, data )
+ *   any   removeLabel( id )
+ *   void  attachToTask( taskId, labelId )
+ *   void  detachFromTask( taskId, labelId )
+ *   void  syncTaskLabels( taskId, labelIds )
+ */
+class {
+
+    function init(){
+        throw(
+            type    = "ILabelService.DoNotInstantiate",
+            message = "ILabelService is a documentation contract. Inject LabelService@tesserabx-pm instead."
+        );
+    }
+
+}

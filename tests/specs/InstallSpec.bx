@@ -336,6 +336,16 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( entry.requiredPermission ).toBe( "pm.view" );
             } );
 
+            // ---- Phase 6a: labels.
+
+            it( "binds LabelService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "LabelService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds LabelDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "LabelDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

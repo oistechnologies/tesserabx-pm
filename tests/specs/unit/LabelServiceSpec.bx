@@ -1,0 +1,137 @@
+/**
+ * LabelServiceSpec: per-project label CRUD + task attach/detach
+ * coverage.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "LabelService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "LabelService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                sleep( 200 );
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createLabel writes a row scoped to the project", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var l = variables.svc.createLabel( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    name           : "bug",
+                    color          : "##d00"
+                } );
+                expect( len( l.getId() ) ).toBeGT( 0 );
+                expect( l.getProjectId() ).toBe( ctx.project.getId() );
+                expect( l.getName() ).toBe( "bug" );
+            } );
+
+            it( "rejects a duplicate name within the same project (case insensitive)", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "BUG" } );
+                expect( function(){
+                    variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "bug" } );
+                } ).toThrow( type = "LabelService.DuplicateName" );
+            } );
+
+            it( "allows the same label name across different projects", function(){
+                var ctx1 = setupProject( fixtureOrgIds );
+                var ctx2 = setupProject( fixtureOrgIds );
+                variables.svc.createLabel( { projectId : ctx1.project.getId(), organizationId : ctx1.orgId, name : "frontend" } );
+                expect( function(){
+                    variables.svc.createLabel( { projectId : ctx2.project.getId(), organizationId : ctx2.orgId, name : "frontend" } );
+                } ).notToThrow();
+            } );
+
+            it( "updateLabel renames and re-checks uniqueness", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var a = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "alpha" } );
+                var b = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "beta"  } );
+                variables.svc.updateLabel( a.getId(), { name : "alpha-renamed" } );
+                expect( function(){
+                    variables.svc.updateLabel( a.getId(), { name : "beta" } );
+                } ).toThrow( type = "LabelService.DuplicateName" );
+            } );
+
+            it( "removeLabel deletes the row and cascades the join", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var l   = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "ephemeral" } );
+                variables.svc.attachToTask( ctx.task.getId(), l.getId() );
+                expect( arrayLen( variables.svc.labelIdsForTask( ctx.task.getId() ) ) ).toBe( 1 );
+                variables.svc.removeLabel( l.getId() );
+                expect( variables.svc.getLabel( l.getId() ) ).toBeNull();
+                expect( arrayLen( variables.svc.labelIdsForTask( ctx.task.getId() ) ) ).toBe( 0 );
+            } );
+
+            it( "attachToTask is idempotent", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var l   = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "once" } );
+                variables.svc.attachToTask( ctx.task.getId(), l.getId() );
+                variables.svc.attachToTask( ctx.task.getId(), l.getId() );
+                var hits = queryExecute(
+                    "SELECT COUNT(*) AS n FROM pm_task_labels WHERE task_id = :tid AND label_id = :lid",
+                    { tid : ctx.task.getId(), lid : l.getId() }
+                );
+                expect( hits.n[ 1 ] ).toBe( 1 );
+            } );
+
+            it( "syncTaskLabels reconciles attach / detach against the desired set", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var a = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "a" } );
+                var b = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "b" } );
+                var c = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "c" } );
+
+                variables.svc.syncTaskLabels( ctx.task.getId(), [ a.getId(), b.getId() ] );
+                var ids1 = variables.svc.labelIdsForTask( ctx.task.getId() );
+                expect( arrayLen( ids1 ) ).toBe( 2 );
+                expect( ids1 ).toInclude( a.getId() );
+                expect( ids1 ).toInclude( b.getId() );
+
+                variables.svc.syncTaskLabels( ctx.task.getId(), [ b.getId(), c.getId() ] );
+                var ids2 = variables.svc.labelIdsForTask( ctx.task.getId() );
+                expect( arrayLen( ids2 ) ).toBe( 2 );
+                expect( ids2 ).toInclude( b.getId() );
+                expect( ids2 ).toInclude( c.getId() );
+                expect( ids2 ).notToInclude( a.getId() );
+            } );
+
+            it( "labelsForTask hydrates the entity set", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var l = variables.svc.createLabel( { projectId : ctx.project.getId(), organizationId : ctx.orgId, name : "hydrated", color : "##07a" } );
+                variables.svc.attachToTask( ctx.task.getId(), l.getId() );
+                var labels = variables.svc.labelsForTask( ctx.task.getId() );
+                expect( arrayLen( labels ) ).toBe( 1 );
+                expect( labels[ 1 ].getName() ).toBe( "hydrated" );
+                expect( labels[ 1 ].getColor() ).toBe( "##07a" );
+            } );
+
+        } );
+    }
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "lbl-" & createUUID(), slug : "lbl-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "lbl-" & createUUID() } );
+        var task    = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "lbl-task" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}

@@ -29,6 +29,7 @@ class extends="cbwire.models.Component" {
     property name="projectService"       inject="ProjectService@tesserabx-pm";
     property name="taskService"          inject="TaskService@tesserabx-pm";
     property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="labelService"         inject="LabelService@tesserabx-pm";
     property name="auth"                 inject="AuthenticationService@cbauth";
 
     data = {
@@ -37,12 +38,13 @@ class extends="cbwire.models.Component" {
         "priority"      : "",
         "assigneeType"  : "",
         "assigneeId"    : "",
+        "labelIds"      : [],
         "detailTaskId"  : "",
         "notice"        : "",
         "noticeKind"    : "info"
     };
 
-    queryString = [ "q", "priority", "assigneeType", "assigneeId" ];
+    queryString = [ "q", "priority", "assigneeType", "assigneeId", "labelIds" ];
 
     // ---------------- Lifecycle ----------------
 
@@ -65,9 +67,15 @@ class extends="cbwire.models.Component" {
                 search       : data.q,
                 priority     : data.priority,
                 assigneeType : data.assigneeType,
-                assigneeId   : data.assigneeId
+                assigneeId   : data.assigneeId,
+                labelIds     : data.labelIds
             }
         );
+    }
+
+    function projectLabels(){
+        if ( !len( data.projectId ) ) return [];
+        return labelService.listForProject( data.projectId );
     }
 
     function detailTask(){
@@ -161,6 +169,19 @@ class extends="cbwire.models.Component" {
         data.priority     = "";
         data.assigneeType = "";
         data.assigneeId   = "";
+        data.labelIds     = [];
+    }
+
+    function toggleLabel( labelId ){
+        var lid = arguments.labelId ?: "";
+        if ( !len( lid ) ) return;
+        var next = duplicate( data.labelIds );
+        if ( arrayContains( next, lid ) ) {
+            arrayDelete( next, lid );
+        } else {
+            next.append( lid );
+        }
+        data.labelIds = next;
     }
 
     // ---------------- internals ----------------

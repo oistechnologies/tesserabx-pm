@@ -88,6 +88,25 @@
                     <button type="button" class="btn btn-outline-secondary w-100" wire:click="clearFilters">Reset</button>
                 </div>
             </div>
+
+            <bx:set local.kbLabels = projectLabels() >
+            <bx:if arrayLen( local.kbLabels )>
+                <div class="mt-3">
+                    <label class="form-label small text-body-secondary mb-1"><i class="bi bi-tags"></i> Labels</label>
+                    <div class="d-flex flex-wrap gap-1">
+                        <bx:loop array="#local.kbLabels#" item="kbl">
+                            <bx:set local.kbActive = arrayContains( data.labelIds, kbl.getId() ) >
+                            <button type="button"
+                                    class="btn btn-sm <bx:if local.kbActive>btn-primary<bx:else>btn-outline-secondary</bx:if>"
+                                    wire:click="toggleLabel('#encodeForHTMLAttribute( kbl.getId() )#')"
+                                    <bx:if local.kbActive and len( kbl.getColor() ?: "" )>style="background-color: #encodeForHTMLAttribute( kbl.getColor() )#; border-color: #encodeForHTMLAttribute( kbl.getColor() )#;"</bx:if>>
+                                <bx:if local.kbActive><i class="bi bi-check-lg"></i></bx:if>
+                                #encodeForHTML( kbl.getName() )#
+                            </button>
+                        </bx:loop>
+                    </div>
+                </div>
+            </bx:if>
         </div>
     </div>
 
@@ -121,6 +140,17 @@
                                     <div class="text-body-secondary small mt-1">
                                         <i class="bi bi-person"></i> #encodeForHTML( t.getAssigneeType() )#
                                         <code class="ms-1">#encodeForHTML( left( t.getAssigneeId(), 8 ) )#…</code>
+                                    </div>
+                                </bx:if>
+                                <bx:set local.tlabels = local.board.labelsByTask[ t.getId() ] ?: [] >
+                                <bx:if arrayLen( local.tlabels )>
+                                    <div class="d-flex flex-wrap gap-1 mt-1">
+                                        <bx:loop array="#local.tlabels#" item="lbl">
+                                            <span class="badge rounded-pill"
+                                                  style="font-size: 0.65rem; <bx:if len( lbl.color )>background-color: #encodeForHTMLAttribute( lbl.color )#;<bx:else>background-color: var(##bs-secondary);</bx:if>">
+                                                #encodeForHTML( lbl.name )#
+                                            </span>
+                                        </bx:loop>
                                     </div>
                                 </bx:if>
                                 <div class="d-flex gap-2 align-items-center mt-1 small text-body-secondary">

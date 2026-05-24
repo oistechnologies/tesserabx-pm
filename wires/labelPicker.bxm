@@ -1,0 +1,31 @@
+<bx:output>
+<bx:script>
+    local.labels = projectLabels();
+</bx:script>
+
+<div class="card" data-pm-wire-id="#_getID()#">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h6 mb-0 text-body-secondary"><i class="bi bi-tags"></i> Labels</h2>
+            <a href="/agent/pm/projects/#encodeForURL( data.projectId )#/labels" class="small text-decoration-none"><i class="bi bi-gear"></i> Manage</a>
+        </div>
+
+        <bx:if !arrayLen( local.labels )>
+            <p class="text-body-secondary small fst-italic mb-0">No labels defined on this project yet. Use "Manage" to add some.</p>
+        <bx:else>
+            <div class="d-flex flex-wrap gap-1">
+                <bx:loop array="#local.labels#" item="l">
+                    <bx:set local.selected = arrayContains( data.selectedIds, l.getId() ) >
+                    <button type="button"
+                            class="btn btn-sm <bx:if local.selected>btn-primary<bx:else>btn-outline-secondary</bx:if>"
+                            wire:click="toggle('#encodeForHTMLAttribute( l.getId() )#')"
+                            <bx:if local.selected and len( l.getColor() ?: "" )>style="background-color: #encodeForHTMLAttribute( l.getColor() )#; border-color: #encodeForHTMLAttribute( l.getColor() )#;"</bx:if>>
+                        <bx:if local.selected><i class="bi bi-check-lg"></i></bx:if>
+                        #encodeForHTML( l.getName() )#
+                    </button>
+                </bx:loop>
+            </div>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

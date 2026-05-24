@@ -1,0 +1,25 @@
+/**
+ * LabelDto: snake-case shape for pm_labels rows on the wire.
+ */
+class singleton=true {
+
+    public struct function fromLabel( required any l ){
+        return {
+            id              : arguments.l.getId(),
+            project_id      : arguments.l.getProjectId(),
+            organization_id : arguments.l.getOrganizationId(),
+            name            : arguments.l.getName(),
+            color           : arguments.l.getColor() ?: "",
+            sort_order      : int( val( arguments.l.getSortOrder() ?: 0 ) ),
+            created_at      : isDate( arguments.l.getCreatedAt() ) ? dateTimeFormat( arguments.l.getCreatedAt(), "iso" ) : "",
+            updated_at      : isDate( arguments.l.getUpdatedAt() ) ? dateTimeFormat( arguments.l.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromLabelArray( required array labels ){
+        var out = [];
+        for ( var l in arguments.labels ) out.append( fromLabel( l ) );
+        return out;
+    }
+
+}

@@ -1,0 +1,73 @@
+<bx:output>
+<bx:script>
+    local.labels = labels();
+</bx:script>
+
+<div class="card" data-pm-wire-id="#_getID()#">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0">Labels <span class="badge text-bg-secondary">#arrayLen( local.labels )#</span></h2>
+        </div>
+
+        <bx:if len( notice )>
+            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+                <span>#encodeForHTML( notice )#</span>
+                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+            </div>
+        </bx:if>
+
+        <form wire:submit.prevent="add" class="row g-2 align-items-end mb-3">
+            <div class="col-12 col-md-6">
+                <label class="form-label small mb-0" for="lm-name">New label</label>
+                <input id="lm-name" type="text" class="form-control form-control-sm" wire:model="newName" maxlength="100" placeholder="e.g. bug, frontend, blocked">
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-0" for="lm-color">Color</label>
+                <input id="lm-color" type="text" class="form-control form-control-sm" wire:model="newColor" maxlength="32" placeholder="e.g. ##0d6efd or red">
+            </div>
+            <div class="col-6 col-md-3">
+                <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-lg"></i> Add</button>
+            </div>
+        </form>
+
+        <bx:if !arrayLen( local.labels )>
+            <p class="text-body-secondary small fst-italic mb-0">No labels yet.</p>
+        <bx:else>
+            <ul class="list-unstyled mb-0">
+                <bx:loop array="#local.labels#" item="l">
+                    <li class="border-top pt-2 pb-2 d-flex justify-content-between align-items-center gap-2">
+                        <bx:if data.editingId eq l.getId()>
+                            <div class="d-flex gap-2 flex-grow-1">
+                                <input type="text" class="form-control form-control-sm" wire:model="editName" style="max-width: 18rem;">
+                                <input type="text" class="form-control form-control-sm" wire:model="editColor" placeholder="color" style="max-width: 10rem;">
+                            </div>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-primary" wire:click="saveEdit()"><i class="bi bi-check-lg"></i></button>
+                                <button class="btn btn-sm btn-outline-secondary" wire:click="cancelEdit()"><i class="bi bi-x-lg"></i></button>
+                            </div>
+                        <bx:else>
+                            <div>
+                                <span class="badge"
+                                    <bx:if len( l.getColor() ?: "" )>
+                                        style="background-color: #encodeForHTMLAttribute( l.getColor() )#;"
+                                    <bx:else>
+                                        style="background-color: var(##bs-secondary);"
+                                    </bx:if>>
+                                    #encodeForHTML( l.getName() )#
+                                </span>
+                                <bx:if len( l.getColor() ?: "" )>
+                                    <code class="ms-2 small text-body-secondary">#encodeForHTML( l.getColor() )#</code>
+                                </bx:if>
+                            </div>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( l.getId() )#')" title="Edit"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( l.getId() )#')" wire:confirm="Delete this label? It will be removed from every task it is attached to." title="Delete"><i class="bi bi-trash"></i></button>
+                            </div>
+                        </bx:if>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,100 @@
+/**
+ * LabelManager: per-project label CRUD UI.
+ *
+ * Mounted from views/labels/index.bxm at
+ * /agent/pm/projects/:projectId/labels.
+ *
+ * Adds + edits + deletes inline. Color is a free-form text input
+ * (the BUILD-PLAN does not constrain it; common values are CSS
+ * names or hex codes prefixed with ##).
+ */
+class extends="cbwire.models.Component" {
+
+    property name="labelService" inject="LabelService@tesserabx-pm";
+
+    data = {
+        "projectId"      : "",
+        "organizationId" : "",
+        "newName"        : "",
+        "newColor"       : "",
+        "editingId"      : "",
+        "editName"       : "",
+        "editColor"      : "",
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.projectId      = arguments.params.projectId      ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+    }
+
+    function labels(){
+        if ( !len( data.projectId ) ) return [];
+        return labelService.listForProject( data.projectId );
+    }
+
+    function add(){
+        var name = trim( data.newName ?: "" );
+        if ( !len( name ) ) {
+            notice( "Enter a label name.", "warning" );
+            return;
+        }
+        try {
+            labelService.createLabel( {
+                projectId      : data.projectId,
+                organizationId : data.organizationId,
+                name           : name,
+                color          : trim( data.newColor ?: "" )
+            } );
+            data.newName  = "";
+            data.newColor = "";
+            notice( "Label added.", "success" );
+        } catch ( any e ) {
+            notice( "Could not add label: " & e.message, "danger" );
+        }
+    }
+
+    function startEdit( id ){
+        var l = labelService.getLabel( arguments.id ?: "" );
+        if ( isNull( l ) ) return;
+        data.editingId = l.getId();
+        data.editName  = l.getName();
+        data.editColor = l.getColor() ?: "";
+    }
+
+    function cancelEdit(){
+        data.editingId = "";
+        data.editName  = "";
+        data.editColor = "";
+    }
+
+    function saveEdit(){
+        if ( !len( data.editingId ?: "" ) ) return;
+        try {
+            labelService.updateLabel( data.editingId, {
+                name  : trim( data.editName ?: "" ),
+                color : trim( data.editColor ?: "" )
+            } );
+            cancelEdit();
+            notice( "Label updated.", "success" );
+        } catch ( any e ) {
+            notice( "Could not update label: " & e.message, "danger" );
+        }
+    }
+
+    function remove( id ){
+        try {
+            labelService.removeLabel( arguments.id ?: "" );
+            notice( "Label removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove label: " & e.message, "danger" );
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}
