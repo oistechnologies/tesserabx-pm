@@ -1,0 +1,137 @@
+/**
+ * CommentThread: the comment composer + thread list on Project /
+ * Task / Subtask detail pages.
+ *
+ * Phase 4a ships a flat (non-threaded) display; the schema already
+ * supports parent_comment_id but the UI does not yet render nested
+ * replies. Threaded display lands when the Phase 4 design needs it
+ * (e.g. once portal-side commenting in Phase 11 makes long threads
+ * the norm).
+ *
+ * Embed from views/tasks/show.bxm (and later Project show) with:
+ *
+ *   #wire(
+ *       name   = "CommentThread@tesserabx-pm",
+ *       params = {
+ *           commentableType : "task",          // or "project" | "subtask"
+ *           commentableId   : prc.task.getId(),
+ *           organizationId  : prc.task.getOrganizationId()
+ *       }
+ *   )#
+ *
+ * Viewer account type is pulled from cbauth's signed-in agent.
+ * The agent composer carries an `is_internal` toggle that defaults
+ * true (BUILD-PLAN §3.5). Contact authoring will land in the Phase
+ * 11 portal embed; this component reads contact comments correctly
+ * already because is_internal filtering is in CommentService.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="commentService" inject="CommentService@tesserabx-pm";
+    property name="auth"           inject="AuthenticationService@cbauth";
+
+    data = {
+        "commentableType" : "",
+        "commentableId"   : "",
+        "organizationId"  : "",
+        "body"            : "",
+        "isInternal"      : true,
+        "notice"          : "",
+        "noticeKind"      : "info"
+    };
+
+    // ---------------- Lifecycle ----------------
+
+    function onMount( required struct params = {} ){
+        data.commentableType = arguments.params.commentableType ?: "";
+        data.commentableId   = arguments.params.commentableId   ?: "";
+        data.organizationId  = arguments.params.organizationId  ?: "";
+    }
+
+    // ---------------- Server-side helpers ----------------
+
+    function comments(){
+        if ( !len( data.commentableType ) || !len( data.commentableId ) ) return [];
+        return commentService.listForCommentable(
+            commentableType : data.commentableType,
+            commentableId   : data.commentableId,
+            viewer          : viewer()
+        );
+    }
+
+    function viewer(){
+        var id = currentAgentId();
+        return { accountType : "agent", accountId : id };
+    }
+
+    /**
+     * Render `@agent:slug` / `@contact:slug` mentions as inline chips.
+     * Body is minimally HTML-escaped first (only &, <, >); using
+     * encodeForHTML here is wrong because BoxLang's OWASP-strict
+     * implementation also encodes `@` and `:`, which kills the regex.
+     * Quote escaping is unnecessary inside text content.
+     */
+    function mentionLink( required string body ){
+        var safe = replace( arguments.body, "&", "&amp;", "all" );
+        safe     = replace( safe,           "<", "&lt;",  "all" );
+        safe     = replace( safe,           ">", "&gt;",  "all" );
+        return reReplaceNoCase(
+            safe,
+            "@(agent|contact):([A-Za-z0-9][A-Za-z0-9-]{0,63})",
+            "<span class='badge text-bg-secondary'>@\1:\2</span>",
+            "all"
+        );
+    }
+
+    // ---------------- Actions ----------------
+
+    function post(){
+        var body = trim( data.body ?: "" );
+        if ( !len( body ) ) return;
+        if ( !len( data.commentableType ) || !len( data.commentableId ) ) {
+            notice( "Cannot post; commentable not bound.", "danger" );
+            return;
+        }
+        try {
+            commentService.createComment( {
+                commentableType : data.commentableType,
+                commentableId   : data.commentableId,
+                organizationId  : data.organizationId,
+                authorType      : "agent",
+                authorId        : currentAgentId(),
+                body            : body,
+                isInternal      : !!data.isInternal
+            } );
+            data.body = "";
+            notice( "Comment posted.", "success" );
+        } catch ( any e ) {
+            notice( "Could not post comment: " & e.message, "danger" );
+        }
+    }
+
+    function deleteComment( id ){
+        try {
+            commentService.removeComment( arguments.id ?: "" );
+            notice( "Comment deleted.", "info" );
+        } catch ( any e ) {
+            notice( "Could not delete: " & e.message, "danger" );
+        }
+    }
+
+    // ---------------- internals ----------------
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

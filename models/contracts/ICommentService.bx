@@ -1,0 +1,54 @@
+/**
+ * ICommentService: documented public surface of
+ * CommentService@tesserabx-pm. Throws on direct use; resolve the
+ * live implementation through WireBox.
+ */
+class {
+
+    public any function getComment( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "ICommentService is a contract; resolve CommentService@tesserabx-pm." );
+    }
+
+    /**
+     * List comments for a commentable. Contact viewers see only
+     * is_internal=false; agents see everything.
+     *
+     * viewer struct shape:
+     *   { accountType : "agent" | "contact", accountId : "..." }
+     */
+    public array function listForCommentable(
+        required string commentableType,
+        required string commentableId,
+        struct viewer = { accountType : "agent" }
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "ICommentService is a contract; resolve CommentService@tesserabx-pm." );
+    }
+
+    /**
+     * Create a comment. Required keys in `data`:
+     *   - commentableType ("project" | "task" | "subtask")
+     *   - commentableId    (uuid)
+     *   - organizationId   (uuid)
+     *   - authorType       ("agent" | "contact")
+     *   - authorId         (uuid)
+     *   - body             (non-empty string)
+     *
+     * Optional:
+     *   - parentCommentId (uuid; threading)
+     *   - isInternal      (boolean; only honored when authorType=agent,
+     *                      defaults true; contact authors always
+     *                      land at is_internal=false)
+     */
+    public any function createComment( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ICommentService is a contract; resolve CommentService@tesserabx-pm." );
+    }
+
+    public any function updateComment( required string id, required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ICommentService is a contract; resolve CommentService@tesserabx-pm." );
+    }
+
+    public any function removeComment( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "ICommentService is a contract; resolve CommentService@tesserabx-pm." );
+    }
+
+}

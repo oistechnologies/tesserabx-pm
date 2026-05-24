@@ -1,0 +1,227 @@
+/**
+ * CommentService: polymorphic comments across Project, Task,
+ * Subtask.
+ *
+ * BUILD-PLAN §3.5 — `is_internal` semantics:
+ *
+ *   - Agent author + default: is_internal = true unless the
+ *     composer flips the toggle off.
+ *   - Contact author: is_internal forced to false at the service
+ *     layer regardless of caller intent. The portal composer omits
+ *     the toggle entirely, but if a misbehaving client tries to
+ *     POST is_internal=true, the service rewrites it.
+ *   - Contact viewer: never sees is_internal=true comments. The
+ *     `listForCommentable( viewer, ... )` scope filters them out;
+ *     handlers that bypass this scope and read directly are a
+ *     bug.
+ *
+ * On create, the service:
+ *   1. Persists the comment row.
+ *   2. Calls MentionService.recordMentions(commentId, body) to
+ *      parse `@agent:...` / `@contact:...` mentions.
+ *   3. Calls WatcherService.autoWatchOnComment(...) so the author
+ *      receives future replies.
+ *   4. Emits `onPmCommentAdded` async via EventPayloadBuilder@core.
+ *
+ * Soft delete via deleted_at per BUILD-PLAN §3.13.
+ */
+class singleton=true {
+
+    property name="wirebox"              inject="wirebox";
+    property name="mentionService"       inject="MentionService@tesserabx-pm";
+    property name="watcherService"       inject="WatcherService@tesserabx-pm";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+
+    variables.VALID_COMMENTABLE_TYPES = [ "project", "task", "subtask" ];
+    variables.VALID_AUTHOR_TYPES      = [ "agent", "contact" ];
+
+    // ---------------- Reads ----------------
+
+    public any function getComment( required string id ){
+        var c = wirebox.getInstance( "Comment@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .whereNull( "deleted_at" )
+            .first();
+        return isNull( c ) ? javaCast( "null", "" ) : c;
+    }
+
+    /**
+     * List comments on a commentable for a specific viewer. The
+     * viewer struct shape matches VisibilityService:
+     *   { accountType : "agent" | "contact", accountId : "..." }
+     *
+     * Contact viewers see only is_internal=false; agents see
+     * everything.
+     */
+    public array function listForCommentable(
+        required string commentableType,
+        required string commentableId,
+        struct viewer = { accountType : "agent" }
+    ){
+        validateCommentableType( arguments.commentableType );
+        var q = wirebox.getInstance( "Comment@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where(     "commentable_type", arguments.commentableType )
+            .where(     "commentable_id",   arguments.commentableId )
+            .whereNull( "deleted_at" )
+            .orderBy(   "created_at", "asc" );
+
+        if ( ( arguments.viewer.accountType ?: "" ) == "contact" ) {
+            q = q.where( "is_internal", false );
+        }
+        return q.get();
+    }
+
+    // ---------------- Writes ----------------
+
+    public any function createComment( required struct data ){
+        if ( !len( arguments.data.commentableType ?: "" ) ) throw( type = "CommentService.MissingField", message = "commentableType is required." );
+        if ( !len( arguments.data.commentableId   ?: "" ) ) throw( type = "CommentService.MissingField", message = "commentableId is required." );
+        if ( !len( arguments.data.organizationId  ?: "" ) ) throw( type = "CommentService.MissingField", message = "organizationId is required." );
+        if ( !len( arguments.data.authorType      ?: "" ) ) throw( type = "CommentService.MissingField", message = "authorType is required." );
+        if ( !len( arguments.data.authorId        ?: "" ) ) throw( type = "CommentService.MissingField", message = "authorId is required." );
+        if ( !len( trim( arguments.data.body ?: "" ) ) )    throw( type = "CommentService.MissingField", message = "body cannot be blank." );
+
+        validateCommentableType( arguments.data.commentableType );
+        if ( !arrayContains( variables.VALID_AUTHOR_TYPES, arguments.data.authorType ) ) {
+            throw( type = "CommentService.InvalidAuthor", message = "authorType must be one of #arrayToList( variables.VALID_AUTHOR_TYPES )#." );
+        }
+
+        // is_internal policy (BUILD-PLAN §3.5):
+        //   - Contact authors NEVER post internal notes; force false.
+        //   - Agent authors default true, but the composer can flip
+        //     it off for client-visible replies.
+        var isInternal = false;
+        if ( arguments.data.authorType == "agent" ) {
+            isInternal = structKeyExists( arguments.data, "isInternal" )
+                ? !!arguments.data.isInternal
+                : true;
+        }
+
+        var comment = wirebox.getInstance( "Comment@tesserabx-pm" );
+        comment.setId(              createUUID() );
+        comment.setOrganizationId(  arguments.data.organizationId );
+        comment.setCommentableType( arguments.data.commentableType );
+        comment.setCommentableId(   arguments.data.commentableId );
+        comment.setParentCommentId( len( arguments.data.parentCommentId ?: "" ) ? arguments.data.parentCommentId : javaCast( "null", "" ) );
+        comment.setAuthorType(      arguments.data.authorType );
+        comment.setAuthorId(        arguments.data.authorId );
+        comment.setBody(            trim( arguments.data.body ) );
+        comment.setIsInternal(      isInternal );
+        comment.save();
+
+        // Parse @mentions and write Mention rows.
+        try {
+            mentionService.recordMentions(
+                commentId      : comment.getId(),
+                organizationId : comment.getOrganizationId(),
+                body           : comment.getBody()
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "CommentService.createComment recordMentions failed for comment [#comment.getId()#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+
+        // Auto-watch the author on the commentable so they see
+        // replies.
+        try {
+            watcherService.autoWatchOnComment(
+                watchableType  : arguments.data.commentableType,
+                watchableId    : arguments.data.commentableId,
+                organizationId : arguments.data.organizationId,
+                authorType     : arguments.data.authorType,
+                authorId       : arguments.data.authorId
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "CommentService.createComment autoWatchOnComment failed for comment [#comment.getId()#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+
+        announceLifecycleEvent(
+            eventName : "onPmCommentAdded",
+            comment   : comment,
+            actorType : arguments.data.authorType,
+            actorId   : arguments.data.authorId
+        );
+
+        return comment;
+    }
+
+    public any function updateComment( required string id, required struct data ){
+        var comment = getComment( arguments.id );
+        if ( isNull( comment ) ) throw( type = "CommentService.UnknownComment", message = "No comment with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "body" ) ) {
+            var trimmed = trim( arguments.data.body );
+            if ( !len( trimmed ) ) throw( type = "CommentService.MissingField", message = "body cannot be blank." );
+            comment.setBody( trimmed );
+        }
+        if ( structKeyExists( arguments.data, "isInternal" ) && comment.getAuthorType() == "agent" ) {
+            // Only agent-authored comments can flip the toggle;
+            // contact-authored stays false forever.
+            comment.setIsInternal( !!arguments.data.isInternal );
+        }
+        comment.save();
+        return comment;
+    }
+
+    public any function removeComment( required string id ){
+        var comment = getComment( arguments.id );
+        if ( isNull( comment ) ) throw( type = "CommentService.UnknownComment", message = "No comment with id [#arguments.id#]." );
+        comment.setDeletedAt( now() );
+        comment.save();
+        return comment;
+    }
+
+    // ---------- internals ----------
+
+    private void function validateCommentableType( required string t ){
+        if ( !arrayContains( variables.VALID_COMMENTABLE_TYPES, arguments.t ) ) {
+            throw(
+                type    = "CommentService.InvalidCommentable",
+                message = "commentable_type must be one of #arrayToList( variables.VALID_COMMENTABLE_TYPES )# (got [#arguments.t#])."
+            );
+        }
+    }
+
+    private void function announceLifecycleEvent(
+        required string eventName,
+        required any comment,
+        required string actorType,
+        required string actorId
+    ){
+        try {
+            interceptorService.announce(
+                arguments.eventName,
+                eventPayloadBuilder.build(
+                    event          : arguments.eventName,
+                    organizationId : arguments.comment.getOrganizationId() ?: "",
+                    actorType      : arguments.actorType,
+                    actorId        : arguments.actorId,
+                    entity         : { type : "Comment", id : arguments.comment.getId() },
+                    metadata       : {
+                        commentable_type : arguments.comment.getCommentableType(),
+                        commentable_id   : arguments.comment.getCommentableId(),
+                        is_internal      : !!arguments.comment.getIsInternal()
+                    }
+                ),
+                true
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "CommentService.announceLifecycleEvent failed for [#arguments.eventName#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

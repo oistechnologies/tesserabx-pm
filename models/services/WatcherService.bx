@@ -1,0 +1,232 @@
+/**
+ * WatcherService: tracks who follows a Project / Task / Subtask.
+ *
+ * Polymorphic on both sides (BUILD-PLAN §3.10):
+ *   - watchable: project | task | subtask
+ *   - watcher:   agent   | contact
+ *
+ * Two auto-add hooks, both flagged `auto_added = true` so the UI
+ * can render them differently from explicit watches:
+ *
+ *   1. autoWatchOnAssignment(...) — TaskService.createTask /
+ *      updateTask calls this whenever the assignee changes; the
+ *      new assignee auto-watches the task.
+ *   2. autoWatchOnComment(...) — CommentService.create calls this
+ *      whenever an agent or contact posts a comment; the author
+ *      auto-watches the commentable (Project | Task | Subtask).
+ *
+ * Manual toggle through `toggle()` flips auto_added=false because a
+ * user expressing intent overrides any earlier auto-add (so future
+ * cleanup logic that culls auto-watches does not remove an
+ * explicit follow).
+ *
+ * Idempotent: every write uses the (watchable_type, watchable_id,
+ * watcher_type, watcher_id) UNIQUE constraint to dedupe at the DB
+ * level. Re-adding an existing watcher is a no-op.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_WATCHABLE_TYPES = [ "project", "task", "subtask" ];
+    variables.VALID_WATCHER_TYPES   = [ "agent", "contact" ];
+
+    // ---------------- Reads ----------------
+
+    public array function listForWatchable(
+        required string watchableType,
+        required string watchableId
+    ){
+        validateWatchableType( arguments.watchableType );
+        return wirebox.getInstance( "Watcher@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "watchable_type", arguments.watchableType )
+            .where( "watchable_id",   arguments.watchableId )
+            .get();
+    }
+
+    public boolean function isWatching(
+        required string watchableType,
+        required string watchableId,
+        required string watcherType,
+        required string watcherId
+    ){
+        validateWatchableType( arguments.watchableType );
+        validateWatcherType(   arguments.watcherType );
+        var hit = queryExecute(
+            "SELECT 1 FROM pm_watchers
+             WHERE  watchable_type = :wt
+             AND    watchable_id   = :wid
+             AND    watcher_type   = :pt
+             AND    watcher_id     = :pid
+             LIMIT  1",
+            {
+                wt  : arguments.watchableType,
+                wid : arguments.watchableId,
+                pt  : arguments.watcherType,
+                pid : arguments.watcherId
+            }
+        );
+        return hit.recordCount > 0;
+    }
+
+    // ---------------- Writes ----------------
+
+    /**
+     * Generic add. Idempotent: if a row already exists for the
+     * tuple, returns the existing row without flipping auto_added.
+     */
+    public any function watch(
+        required string watchableType,
+        required string watchableId,
+        required string organizationId,
+        required string watcherType,
+        required string watcherId,
+        boolean autoAdded = false
+    ){
+        validateWatchableType( arguments.watchableType );
+        validateWatcherType(   arguments.watcherType );
+        if ( !len( arguments.watcherId ) ) return javaCast( "null", "" );
+
+        var existing = wirebox.getInstance( "Watcher@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "watchable_type", arguments.watchableType )
+            .where( "watchable_id",   arguments.watchableId )
+            .where( "watcher_type",   arguments.watcherType )
+            .where( "watcher_id",     arguments.watcherId )
+            .first();
+        if ( !isNull( existing ) ) return existing;
+
+        var row = wirebox.getInstance( "Watcher@tesserabx-pm" );
+        row.setId(             createUUID() );
+        row.setOrganizationId( arguments.organizationId );
+        row.setWatchableType(  arguments.watchableType );
+        row.setWatchableId(    arguments.watchableId );
+        row.setWatcherType(    arguments.watcherType );
+        row.setWatcherId(      arguments.watcherId );
+        row.setAutoAdded(      !!arguments.autoAdded );
+        row.save();
+        return row;
+    }
+
+    /**
+     * Toggle: add when missing, remove when present. Always
+     * stamps auto_added=false on add so an explicit user click
+     * outranks future auto-cleanup.
+     */
+    public boolean function toggle(
+        required string watchableType,
+        required string watchableId,
+        required string organizationId,
+        required string watcherType,
+        required string watcherId
+    ){
+        if ( isWatching( arguments.watchableType, arguments.watchableId, arguments.watcherType, arguments.watcherId ) ) {
+            unwatch(
+                watchableType : arguments.watchableType,
+                watchableId   : arguments.watchableId,
+                watcherType   : arguments.watcherType,
+                watcherId     : arguments.watcherId
+            );
+            return false;
+        }
+        watch(
+            watchableType  : arguments.watchableType,
+            watchableId    : arguments.watchableId,
+            organizationId : arguments.organizationId,
+            watcherType    : arguments.watcherType,
+            watcherId      : arguments.watcherId,
+            autoAdded      : false
+        );
+        return true;
+    }
+
+    public void function unwatch(
+        required string watchableType,
+        required string watchableId,
+        required string watcherType,
+        required string watcherId
+    ){
+        queryExecute(
+            "DELETE FROM pm_watchers
+             WHERE  watchable_type = :wt
+             AND    watchable_id   = :wid
+             AND    watcher_type   = :pt
+             AND    watcher_id     = :pid",
+            {
+                wt  : arguments.watchableType,
+                wid : arguments.watchableId,
+                pt  : arguments.watcherType,
+                pid : arguments.watcherId
+            }
+        );
+    }
+
+    /**
+     * Hook called from TaskService.createTask / updateTask when
+     * the assignee column changes. The new assignee, if present,
+     * auto-watches the task; old assignees stay subscribed
+     * (Phase 4 v1 does not auto-unwatch, mirroring how the host
+     * tickets module handles assignee history).
+     */
+    public void function autoWatchOnAssignment(
+        required string watchableType,
+        required string watchableId,
+        required string organizationId,
+        required string assigneeType,
+        required string assigneeId
+    ){
+        if ( !len( arguments.assigneeType ) || !len( arguments.assigneeId ) ) return;
+        watch(
+            watchableType  : arguments.watchableType,
+            watchableId    : arguments.watchableId,
+            organizationId : arguments.organizationId,
+            watcherType    : arguments.assigneeType,
+            watcherId      : arguments.assigneeId,
+            autoAdded      : true
+        );
+    }
+
+    /**
+     * Hook called from CommentService.create. The comment author
+     * auto-watches the commentable so they receive replies.
+     */
+    public void function autoWatchOnComment(
+        required string watchableType,
+        required string watchableId,
+        required string organizationId,
+        required string authorType,
+        required string authorId
+    ){
+        if ( !len( arguments.authorType ) || !len( arguments.authorId ) ) return;
+        watch(
+            watchableType  : arguments.watchableType,
+            watchableId    : arguments.watchableId,
+            organizationId : arguments.organizationId,
+            watcherType    : arguments.authorType,
+            watcherId      : arguments.authorId,
+            autoAdded      : true
+        );
+    }
+
+    // ---------- internals ----------
+
+    private void function validateWatchableType( required string t ){
+        if ( !arrayContains( variables.VALID_WATCHABLE_TYPES, arguments.t ) ) {
+            throw(
+                type    = "WatcherService.InvalidWatchable",
+                message = "watchable_type must be one of #arrayToList( variables.VALID_WATCHABLE_TYPES )# (got [#arguments.t#])."
+            );
+        }
+    }
+
+    private void function validateWatcherType( required string t ){
+        if ( !arrayContains( variables.VALID_WATCHER_TYPES, arguments.t ) ) {
+            throw(
+                type    = "WatcherService.InvalidWatcher",
+                message = "watcher_type must be one of #arrayToList( variables.VALID_WATCHER_TYPES )# (got [#arguments.t#])."
+            );
+        }
+    }
+
+}

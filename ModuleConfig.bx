@@ -56,7 +56,8 @@ class {
                 minCoreVersion : "0.0.1",
                 contributesTo  : [
                     "permissions", "roles", "navigation",
-                    "adminPages", "settings", "routeClaims"
+                    "adminPages", "settings", "routeClaims",
+                    "apiResources", "webhookEvents", "assets"
                 ],
                 requiresAi     : false,
 
@@ -234,7 +235,23 @@ class {
                 // Phase 4: audit event types, project event timeline,
                 // and the canonical event envelopes PM announces.
                 auditEvents             : [],
-                webhookEvents           : [],
+                // Outbound webhook event keys PM announces through
+                // EventPayloadBuilder@core. Phase 4a ships the
+                // comment-side declarations and the task/project
+                // events already firing from Phase 2+; Phase 4b adds
+                // the remaining lifecycle keys when the
+                // ProjectEventLogger interceptor lands.
+                webhookEvents : [
+                    { key : "tesserabx-pm.project_created",      label : "PM project created" },
+                    { key : "tesserabx-pm.project_archived",     label : "PM project archived" },
+                    { key : "tesserabx-pm.task_created",         label : "PM task created" },
+                    { key : "tesserabx-pm.task_assigned",        label : "PM task assigned" },
+                    { key : "tesserabx-pm.task_status_changed",  label : "PM task status changed" },
+                    { key : "tesserabx-pm.task_completed",       label : "PM task completed" },
+                    { key : "tesserabx-pm.subtask_created",      label : "PM subtask created" },
+                    { key : "tesserabx-pm.subtask_completed",    label : "PM subtask completed" },
+                    { key : "tesserabx-pm.comment_added",        label : "PM comment added" }
+                ],
 
                 // Phase 8: bidirectional ticket integration.
                 ticketPanels            : [],
@@ -295,6 +312,15 @@ class {
         binder.map( "SubtaskService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.SubtaskService" )
               .asSingleton();
+        binder.map( "CommentService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.CommentService" )
+              .asSingleton();
+        binder.map( "MentionService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.MentionService" )
+              .asSingleton();
+        binder.map( "WatcherService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.WatcherService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -305,6 +331,9 @@ class {
               .asSingleton();
         binder.map( "SubtaskDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.SubtaskDto" )
+              .asSingleton();
+        binder.map( "CommentDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.CommentDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

@@ -1,0 +1,53 @@
+/**
+ * IWatcherService: documented public surface of
+ * WatcherService@tesserabx-pm.
+ */
+class {
+
+    public array function listForWatchable(
+        required string watchableType,
+        required string watchableId
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IWatcherService is a contract; resolve WatcherService@tesserabx-pm." );
+    }
+
+    public boolean function isWatching(
+        required string watchableType,
+        required string watchableId,
+        required string watcherType,
+        required string watcherId
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IWatcherService is a contract; resolve WatcherService@tesserabx-pm." );
+    }
+
+    public any function watch(
+        required string watchableType,
+        required string watchableId,
+        required string organizationId,
+        required string watcherType,
+        required string watcherId,
+        boolean autoAdded = false
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IWatcherService is a contract; resolve WatcherService@tesserabx-pm." );
+    }
+
+    public boolean function toggle(
+        required string watchableType,
+        required string watchableId,
+        required string organizationId,
+        required string watcherType,
+        required string watcherId
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IWatcherService is a contract; resolve WatcherService@tesserabx-pm." );
+    }
+
+    public void function unwatch(
+        required string watchableType,
+        required string watchableId,
+        required string watcherType,
+        required string watcherId
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IWatcherService is a contract; resolve WatcherService@tesserabx-pm." );
+    }
+
+}

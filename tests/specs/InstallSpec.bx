@@ -25,7 +25,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.settingsReg  = variables.wb.getInstance( "SettingsRegistry@core" );
         variables.routeClaims  = variables.wb.getInstance( "RouteClaimsRegistry@core" );
         variables.apiResources = variables.wb.getInstance( "ApiResourceRegistry@api" );
-        variables.assetService = variables.wb.getInstance( "AddonAssetService@core" );
+        variables.assetService     = variables.wb.getInstance( "AddonAssetService@core" );
+        variables.webhookRegistry  = variables.wb.getInstance( "WebhookEventRegistry@api" );
     }
 
     function run(){
@@ -202,6 +203,35 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 var jsSrcs  = assets.filter( ( a ) => a.kind == "js" ).map( ( a ) => a.src );
                 expect( jsSrcs ).toInclude( "/modules/tesserabx-pm/resources/vendor/sortablejs-1.15.6/Sortable.min.js" );
                 expect( jsSrcs ).toInclude( "/modules/tesserabx-pm/resources/js/board.js" );
+            } );
+
+            // ---- Phase 4a: collaboration services + webhook events.
+
+            it( "binds CommentService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "CommentService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds MentionService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "MentionService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds WatcherService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "WatcherService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds CommentDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "CommentDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers webhookEvents for the Phase 4a lifecycle keys", function(){
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.comment_added"        ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.project_created"     ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.task_created"        ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.task_assigned"       ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.task_status_changed" ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.task_completed"      ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.subtask_created"     ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.subtask_completed"   ) ).toBeTrue();
             } );
 
             // ---- Phase 2c: REST API surface.

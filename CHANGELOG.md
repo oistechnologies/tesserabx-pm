@@ -6,6 +6,23 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 4a: Comments, Mentions, Watchers
+
+- `CommentService@tesserabx-pm` ships polymorphic comment CRUD across Project / Task / Subtask. `listForCommentable(commentableType, commentableId, viewer)` filters `is_internal=true` rows from contact viewers. BUILD-PLAN §3.5 `is_internal` policy enforced at the service layer: agent authors default true (the composer can flip it off); contact authors are always forced false even if the caller passes `isInternal=true`. Soft delete via `deleted_at`. Emits `onPmCommentAdded` async.
+- `MentionService@tesserabx-pm` parses `@agent:<token>` and `@contact:<token>` mention forms from a comment body and writes `pm_mentions` rows. Pure-write from the comment perspective: `extractMentions(body)` is the regex-only parser (used by the template's mention-chip renderer), `recordMentions(commentId, organizationId, body)` runs the parser + persists. Dedupes repeated mentions of the same user inside one body.
+- `WatcherService@tesserabx-pm` is polymorphic on both sides: watchable (`project|task|subtask`) and watcher (`agent|contact`). `watch` / `unwatch` / `toggle` / `isWatching` / `listForWatchable`. Two auto-add hooks: `autoWatchOnAssignment(...)` and `autoWatchOnComment(...)`. Idempotent — the DB unique constraint dedupes at the row level so re-adding an existing watcher is a no-op.
+- Hooks wired:
+  - `TaskService.createTask` and `updateTask` call `watcherService.autoWatchOnAssignment(...)` when the assignee column changes.
+  - `CommentService.createComment` calls `watcherService.autoWatchOnComment(...)` plus `mentionService.recordMentions(...)` for every successful create.
+- New contracts: `ICommentService@tesserabx-pm`, `IWatcherService@tesserabx-pm`.
+- New DTO: `CommentDto@tesserabx-pm` with `fromComment` / `fromCommentArray` returning snake_case structs.
+- New CBWire component: `CommentThread@tesserabx-pm` (in `wires/CommentThread.bx` + `wires/commentThread.bxm`). Composer + flat chronological thread + agent-side `is_internal` toggle (defaults true; switch off for client-visible replies) + author-only delete button. Mention chips rendered inline via a template-side regex replace so `@agent:alice` shows up as a badge. Embedded on the task detail page (`views/tasks/show.bxm`) with `#wire( name = "CommentThread@tesserabx-pm", params = { commentableType : "task", commentableId : ..., organizationId : ... } )#`.
+- Manifest `webhookEvents` populated with 9 lifecycle keys: `project_created` / `project_archived`, `task_created` / `task_assigned` / `task_status_changed` / `task_completed`, `subtask_created` / `subtask_completed`, `comment_added`. Hooks back to the canonical envelopes PM services already emit via `EventPayloadBuilder@core` from Phase 2 onward.
+- `contributesTo` extended with `apiResources`, `webhookEvents`, `assets` so the host's admin add-ons page surfaces the full Phase 4a contribution catalog.
+- New test bundles: `CommentServiceSpec` (6 specs), `MentionServiceSpec` (5 specs), `WatcherServiceSpec` (5 specs). `InstallSpec` adds 5 new probes: three service bindings, CommentDto binding, and a webhookEvents probe asserting all 9 lifecycle keys land in `WebhookEventRegistry@api`. 34 specs total in InstallSpec.
+- Deferred to Phase 4b: `ProjectEventLogger` interceptor (listens for `onPm*` events and writes `pm_project_events` rows); project event feed view + per-task event view; `auditEvents` manifest declarations; audit-log writes when a task assignment crosses to a Contact (BUILD-PLAN §3.11 compliance event `tesserabx-pm.task_assigned_to_contact`).
+- Deferred to a later Phase 4 pass: threaded comment display (the schema supports `parent_comment_id`; the v1 UI is flat chronological); the `@agent:slug` / `@contact:slug` autocomplete dropdown in the composer.
+
 ### Phase 3b: CBWire Kanban + Drag-and-Drop
 
 - `KanbanBoard@tesserabx-pm` CBWire component replaces the server-rendered board view from Phase 3a. Mounted from `views/tasks/index.bxm` with `#wire( name = "KanbanBoard@tesserabx-pm", params = { projectId : ... } )#`. State (`q`, `priority`, `assigneeType`, `assigneeId`) is URL-persisted via `queryString` so a refreshed board keeps the filter applied. Transient state (`detailTaskId`, `notice`/`noticeKind`) is component-local.

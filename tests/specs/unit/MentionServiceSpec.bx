@@ -1,0 +1,104 @@
+/**
+ * MentionServiceSpec: parser + persistence coverage.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "MentionService@tesserabx-pm" );
+        variables.commentSvc = variables.wb.getInstance( "CommentService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "MentionService@tesserabx-pm", function(){
+
+            describe( "extractMentions (pure parser)", function(){
+
+                it( "returns an empty array for a body with no mentions", function(){
+                    expect( variables.svc.extractMentions( "Just a plain comment, no mentions." ) ).toBe( [] );
+                } );
+
+                it( "captures @agent:slug and @contact:slug forms", function(){
+                    var hits = variables.svc.extractMentions( "Hi @agent:alice and @contact:acme-bob, see this." );
+                    expect( arrayLen( hits ) ).toBe( 2 );
+                    expect( hits[ 1 ].type ).toBe( "agent" );
+                    expect( hits[ 1 ].id   ).toBe( "alice" );
+                    expect( hits[ 2 ].type ).toBe( "contact" );
+                    expect( hits[ 2 ].id   ).toBe( "acme-bob" );
+                } );
+
+                it( "dedupes repeated mentions of the same user", function(){
+                    var hits = variables.svc.extractMentions( "@agent:alice ping; also @agent:alice ping again." );
+                    expect( arrayLen( hits ) ).toBe( 1 );
+                } );
+
+                it( "ignores bare @word without a colon-qualifier", function(){
+                    expect( variables.svc.extractMentions( "Hi @alice, see you" ) ).toBe( [] );
+                } );
+
+                it( "captures UUID-shaped ids", function(){
+                    var u = createUUID();
+                    var hits = variables.svc.extractMentions( "Hello @agent:" & u );
+                    expect( arrayLen( hits ) ).toBe( 1 );
+                    expect( hits[ 1 ].id ).toBe( u );
+                } );
+
+            } );
+
+            describe( "recordMentions (persistence)", function(){
+
+                var fixtureOrgIds = [];
+
+                afterEach( function( currentSpec ){
+                    for ( var orgId in fixtureOrgIds ) {
+                        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                    }
+                    fixtureOrgIds = [];
+                } );
+
+                it( "writes one pm_mentions row per extracted mention via createComment", function(){
+                    // Use the full createComment path so the
+                    // CommentService -> MentionService wiring is
+                    // exercised end-to-end.
+                    var ctx = setupTask( fixtureOrgIds );
+                    var c = variables.commentSvc.createComment( {
+                        commentableType : "task",
+                        commentableId   : ctx.task.getId(),
+                        organizationId  : ctx.orgId,
+                        authorType      : "agent",
+                        authorId        : createUUID(),
+                        body            : "Looping in @agent:alice and @contact:bob-corp"
+                    } );
+                    var rows = queryExecute(
+                        "SELECT mentioned_user_type, mentioned_user_id
+                         FROM   pm_mentions
+                         WHERE  comment_id = :cid
+                         ORDER BY created_at ASC",
+                        { cid : c.getId() }
+                    );
+                    expect( rows.recordCount ).toBe( 2 );
+                } );
+
+            } );
+
+        } );
+    }
+
+    private struct function setupTask( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "mention-" & createUUID(), slug : "mention-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "mention-" & createUUID() } );
+        var task    = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "mention target" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}

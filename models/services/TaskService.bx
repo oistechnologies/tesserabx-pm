@@ -44,6 +44,7 @@ class singleton=true {
     property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
     property name="auditService"         inject="AuditService@audit";
     property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="watcherService"       inject="WatcherService@tesserabx-pm";
 
     variables.VALID_PRIORITIES     = [ "low", "medium", "high", "urgent" ];
     variables.VALID_ASSIGNEE_TYPES = [ "agent", "contact" ];
@@ -170,6 +171,21 @@ class singleton=true {
                     assigneeId   : task.getAssigneeId()
                 }
             );
+            try {
+                watcherService.autoWatchOnAssignment(
+                    watchableType  : "task",
+                    watchableId    : task.getId(),
+                    organizationId : task.getOrganizationId(),
+                    assigneeType   : task.getAssigneeType() ?: "",
+                    assigneeId     : task.getAssigneeId()   ?: ""
+                );
+            } catch ( any e ) {
+                writeLog(
+                    text : "TaskService.createTask autoWatchOnAssignment failed for task [#task.getId()#]: #e.message#",
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+            }
         }
 
         return task;
@@ -296,6 +312,23 @@ class singleton=true {
                     assigneeId   : task.getAssigneeId()   ?: ""
                 }
             );
+            if ( len( task.getAssigneeId() ?: "" ) ) {
+                try {
+                    watcherService.autoWatchOnAssignment(
+                        watchableType  : "task",
+                        watchableId    : task.getId(),
+                        organizationId : task.getOrganizationId(),
+                        assigneeType   : task.getAssigneeType() ?: "",
+                        assigneeId     : task.getAssigneeId()   ?: ""
+                    );
+                } catch ( any e ) {
+                    writeLog(
+                        text : "TaskService.updateTask autoWatchOnAssignment failed for task [#task.getId()#]: #e.message#",
+                        log  : "tesserabx",
+                        type : "warning"
+                    );
+                }
+            }
         }
 
         return task;

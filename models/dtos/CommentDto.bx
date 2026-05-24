@@ -1,0 +1,29 @@
+/**
+ * CommentDto: maps a Comment entity to a snake_case struct.
+ * Same shape conventions as ProjectDto / TaskDto / SubtaskDto.
+ */
+class singleton=true {
+
+    public struct function fromComment( required any entity ){
+        var c = arguments.entity;
+        return {
+            id                : c.getId(),
+            organization_id   : c.getOrganizationId()  ?: "",
+            commentable_type  : c.getCommentableType() ?: "",
+            commentable_id    : c.getCommentableId()   ?: "",
+            parent_comment_id : c.getParentCommentId() ?: "",
+            author_type       : c.getAuthorType()      ?: "",
+            author_id         : c.getAuthorId()        ?: "",
+            body              : c.getBody()            ?: "",
+            is_internal       : !!c.getIsInternal(),
+            created_at        : toString( c.getCreatedAt() ?: "" ),
+            updated_at        : toString( c.getUpdatedAt() ?: "" ),
+            deleted_at        : toString( c.getDeletedAt() ?: "" )
+        };
+    }
+
+    public array function fromCommentArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromComment( e ) );
+    }
+
+}

@@ -1,0 +1,104 @@
+/**
+ * WatcherServiceSpec: auto-watch hooks + manual toggle coverage.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "WatcherService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.commentSvc = variables.wb.getInstance( "CommentService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "WatcherService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "watch writes a row and is idempotent on repeat", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var watcherId = createUUID();
+                variables.svc.watch(
+                    watchableType  : "task", watchableId : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    watcherType    : "agent", watcherId : watcherId
+                );
+                variables.svc.watch(
+                    watchableType  : "task", watchableId : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    watcherType    : "agent", watcherId : watcherId
+                );
+                var hits = queryExecute(
+                    "SELECT COUNT(*) AS n FROM pm_watchers WHERE watchable_type='task' AND watchable_id=:wid AND watcher_id=:pid",
+                    { wid : ctx.task.getId(), pid : watcherId }
+                );
+                expect( hits.n[ 1 ] ).toBe( 1 );
+            } );
+
+            it( "toggle adds then removes", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var watcherId = createUUID();
+                var added = variables.svc.toggle( "task", ctx.task.getId(), ctx.orgId, "agent", watcherId );
+                expect( added ).toBeTrue();
+                expect( variables.svc.isWatching( "task", ctx.task.getId(), "agent", watcherId ) ).toBeTrue();
+
+                var removed = variables.svc.toggle( "task", ctx.task.getId(), ctx.orgId, "agent", watcherId );
+                expect( removed ).toBeFalse();
+                expect( variables.svc.isWatching( "task", ctx.task.getId(), "agent", watcherId ) ).toBeFalse();
+            } );
+
+            it( "TaskService.createTask auto-watches the assignee", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var assigneeId = createUUID();
+                var t = variables.taskSvc.createTask( {
+                    projectId : ctx.project.getId(), organizationId : ctx.orgId,
+                    title : "with assignee", assigneeType : "agent", assigneeId : assigneeId,
+                    actorType : "agent", actorId : createUUID()
+                } );
+                expect( variables.svc.isWatching( "task", t.getId(), "agent", assigneeId ) ).toBeTrue();
+            } );
+
+            it( "CommentService.createComment auto-watches the author on the commentable", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var authorId = createUUID();
+                variables.commentSvc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "agent", authorId : authorId, body : "ping"
+                } );
+                expect( variables.svc.isWatching( "task", ctx.task.getId(), "agent", authorId ) ).toBeTrue();
+            } );
+
+            it( "watch rejects an unknown watcher_type", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.watch( "task", ctx.task.getId(), ctx.orgId, "robot", createUUID() );
+                } ).toThrow( type = "WatcherService.InvalidWatcher" );
+            } );
+
+        } );
+    }
+
+    private struct function setupTask( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "watch-" & createUUID(), slug : "watch-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "watch-" & createUUID() } );
+        var task    = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "watch target" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}

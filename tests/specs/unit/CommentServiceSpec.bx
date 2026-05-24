@@ -1,0 +1,138 @@
+/**
+ * CommentServiceSpec: covers the Phase 4a comment lifecycle plus
+ * the BUILD-PLAN §3.5 is_internal policy.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.svc        = variables.wb.getInstance( "CommentService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "CommentService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute(
+                        "DELETE FROM organizations WHERE id = :id",
+                        { id : orgId }
+                    );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createComment writes a row with the trimmed body", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var c = variables.svc.createComment( {
+                    commentableType : "task",
+                    commentableId   : ctx.task.getId(),
+                    organizationId  : ctx.orgId,
+                    authorType      : "agent",
+                    authorId        : createUUID(),
+                    body            : "  hello world  "
+                } );
+                expect( c.getId() ).notToBeEmpty();
+                expect( c.getBody() ).toBe( "hello world" );
+            } );
+
+            it( "agent default is is_internal=true; toggle works", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var agentId = createUUID();
+                var defaulted = variables.svc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "agent", authorId : agentId, body : "default internal"
+                } );
+                expect( !!defaulted.getIsInternal() ).toBeTrue();
+
+                var external = variables.svc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "agent", authorId : agentId, body : "client-visible", isInternal : false
+                } );
+                expect( !!external.getIsInternal() ).toBeFalse();
+            } );
+
+            it( "contact comments are forced is_internal=false even if caller asks otherwise", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var c = variables.svc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "contact", authorId : createUUID(),
+                    body : "client tries internal", isInternal : true
+                } );
+                expect( !!c.getIsInternal() ).toBeFalse( "Contact authors must never produce internal notes." );
+            } );
+
+            it( "createComment rejects an empty body", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createComment( {
+                        commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                        authorType : "agent", authorId : createUUID(),
+                        body : "   "
+                    } );
+                } ).toThrow( type = "CommentService.MissingField" );
+            } );
+
+            it( "listForCommentable filters internal notes from contact viewers", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var agentId = createUUID();
+                variables.svc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "agent", authorId : agentId,
+                    body : "internal", isInternal : true
+                } );
+                variables.svc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "agent", authorId : agentId,
+                    body : "client visible", isInternal : false
+                } );
+
+                var agentSees   = variables.svc.listForCommentable( "task", ctx.task.getId(), { accountType : "agent",   accountId : agentId } );
+                var contactSees = variables.svc.listForCommentable( "task", ctx.task.getId(), { accountType : "contact", accountId : createUUID() } );
+                expect( arrayLen( agentSees   ) ).toBe( 2 );
+                expect( arrayLen( contactSees ) ).toBe( 1, "Contacts see only is_internal=false comments." );
+                expect( contactSees[ 1 ].getBody() ).toBe( "client visible" );
+            } );
+
+            it( "removeComment soft-deletes (the row stays but listForCommentable hides it)", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var c = variables.svc.createComment( {
+                    commentableType : "task", commentableId : ctx.task.getId(), organizationId : ctx.orgId,
+                    authorType : "agent", authorId : createUUID(), body : "transient"
+                } );
+                variables.svc.removeComment( c.getId() );
+                expect( variables.svc.getComment( c.getId() ) ).toBeNull();
+                var visible = variables.svc.listForCommentable( "task", ctx.task.getId() );
+                expect( arrayLen( visible ) ).toBe( 0 );
+            } );
+
+        } );
+    }
+
+    // ---------- fixture helpers ----------
+
+    private struct function setupTask( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            {
+                id   : orgId,
+                name : "comment-" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                slug : "comment-" & lCase( replace( createUUID(), "-", "", "all" ) )
+            }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "comments-" & createUUID() } );
+        var task    = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "comment target" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}

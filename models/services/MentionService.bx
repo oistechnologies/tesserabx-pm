@@ -1,0 +1,94 @@
+/**
+ * MentionService: parses @mentions from a comment body and writes
+ * pm_mentions rows.
+ *
+ * BUILD-PLAN §3.9 requires both account families as first-class
+ * mention targets, so the recognised forms are:
+ *
+ *   @agent:<slug-or-uuid>
+ *   @contact:<slug-or-uuid>
+ *
+ * The colon-delimited form is unambiguous and survives autocomplete
+ * insertion. A bare `@<word>` is not parsed (it would require a
+ * username lookup the host does not yet support); the CommentThread
+ * autocomplete (Phase 4-later) inserts the qualified form on pick.
+ *
+ * The service is pure-write from the CommentService.create perspective:
+ * it does not echo mentions back. CommentThread re-renders pulls the
+ * fresh comment list on the next tick.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_TYPES = [ "agent", "contact" ];
+    // Captures `@agent:<token>` or `@contact:<token>` where token
+    // is uuid-shaped or slug-shaped (alphanumerics + dashes).
+    variables.MENTION_PATTERN = "(?i)@(agent|contact):([A-Za-z0-9][A-Za-z0-9-]{0,63})";
+
+    /**
+     * Parse the body and write one pm_mentions row per recognised
+     * mention. Duplicate (comment, type, id) tuples are deduped in
+     * the same call so a body that names the same user twice
+     * produces a single row.
+     *
+     * Returns the array of structs that were persisted; useful for
+     * the caller to fan-out notification events (Phase 9 ships the
+     * notification template, but PM's `onPmMentioned` event is
+     * announced here as best-effort so listeners can attach now).
+     */
+    public array function recordMentions(
+        required string commentId,
+        required string organizationId,
+        required string body
+    ){
+        var hits = extractMentions( arguments.body );
+        var out  = [];
+        for ( var m in hits ) {
+            var row = wirebox.getInstance( "Mention@tesserabx-pm" );
+            row.setId(                createUUID() );
+            row.setCommentId(         arguments.commentId );
+            row.setOrganizationId(    arguments.organizationId );
+            row.setMentionedUserType( m.type );
+            row.setMentionedUserId(   m.id );
+            row.save();
+            out.append( m );
+        }
+        return out;
+    }
+
+    /**
+     * Pure parser. Returns an array of distinct
+     * `{ type : "agent" | "contact", id : "<token>" }` structs.
+     * Useful in tests + for the CommentThread autocomplete preview.
+     */
+    public array function extractMentions( required string body ){
+        if ( !len( arguments.body ?: "" ) ) return [];
+        var seen = {};
+        var out  = [];
+        var matches = reMatchNoCase( variables.MENTION_PATTERN, arguments.body );
+        for ( var raw in matches ) {
+            // Re-extract the captured groups; reMatchNoCase returns
+            // the full matched string, not the groups.
+            var groups = "";
+            try {
+                groups = reFindNoCase(
+                    variables.MENTION_PATTERN,
+                    raw,
+                    1,
+                    true
+                );
+            } catch ( any e ) { continue; }
+            if ( !structKeyExists( groups, "match" ) || arrayLen( groups.match ) lt 3 ) continue;
+            var mType = lCase( groups.match[ 2 ] );
+            var mId   = groups.match[ 3 ];
+            if ( !arrayContains( variables.VALID_TYPES, mType ) ) continue;
+            var key = mType & ":" & mId;
+            if ( structKeyExists( seen, key ) ) continue;
+            seen[ key ] = true;
+            out.append( { type : mType, id : mId } );
+        }
+        return out;
+    }
+
+}
