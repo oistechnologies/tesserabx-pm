@@ -6,6 +6,22 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 2b: Task and Subtask CRUD on the Agent Surface
+
+- `TaskService@tesserabx-pm` ships full CRUD on `pm_tasks` (BUILD-PLAN §7.1): create / list / get / update / remove / restore. Polymorphic assignee validation rejects half-populated `(assignee_type, assignee_id)` pairs. Status transitions stamp `completed_at` when moving into a status row with `is_completed=true` and clear it (via direct SQL, working around Quick's null-binding behavior on timestamp columns) when moving away. Emits `onPmTaskCreated`, `onPmTaskAssigned`, `onPmTaskStatusChanged` (sync, so the Phase 8 close-on-complete listener can react in-band), and `onPmTaskCompleted`.
+- `SubtaskService@tesserabx-pm` ships full CRUD on `pm_subtasks` (BUILD-PLAN §7.1): create / list / get / update / remove / restore. Polymorphic assignee validation matches Task. Toggling `is_completed` stamps or clears `completed_at` in the same direct-SQL pattern. Emits `onPmSubtaskCreated` and `onPmSubtaskCompleted`.
+- `ProjectStatusService@tesserabx-pm` lands as a read + hydrate service. `listForProject`, `getStatus`, `defaultStatusForProject`, and `hydrateFromTemplate(projectId, organizationId, templateId)`. The full per-project CRUD UI is deferred to Phase 2c.
+- `ProjectService.createProject` now calls `projectStatusService.hydrateFromTemplate` so every new project ships with the default 5-column kanban (Backlog / To Do / In Progress / In Review / Done) from the Phase 1 seeded "Standard Workflow" template. Hydration is wrapped in try/catch and logs warnings; project creation never blocks on hydrate failures.
+- `VisibilityService@tesserabx-pm` expanded with task-side Option C: `tasksQueryForViewer(viewer, projectId)` builds the Quick query a contact viewer is allowed to see (own assignment, another-contact-in-org assignment, or `is_client_visible=true`) and `canViewTask(viewer, task)` / `assertCanViewTask(viewer, task)` give the per-row guards.
+- New contracts: `ITaskService@tesserabx-pm`, `ISubtaskService@tesserabx-pm` (documentation classes that throw on direct use).
+- New DTOs: `TaskDto@tesserabx-pm`, `SubtaskDto@tesserabx-pm` with `fromTask`/`fromTaskArray` and `fromSubtask`/`fromSubtaskArray`. Snake-case structs, null-coalesced, timestamps stringified.
+- Agent handlers: `handlers/Tasks.bx` (index by project, show, new, create, edit, update, remove, restore) and `handlers/Subtasks.bx` (new, create, edit, update, complete, reopen, remove). Tasks list is nested under `/agent/pm/projects/:projectId/tasks`; everything else routes by id under `/agent/pm/tasks/*` or `/agent/pm/subtasks/*` because UUIDs are unique.
+- Views: `views/tasks/{index,show,new,edit}.bxm` (the index is a column board grouped by status); `views/subtasks/{new,edit}.bxm` (the inline subtask list lives on tasks/show). `views/projects/show.bxm` updated with task-list and create-task links.
+- `models/entities/Task.bx` and `Subtask.bx` get `sqltype="decimal"` on `estimated_hours` so the JDBC binder sends a real numeric instead of a varchar.
+- New test bundles: `tests/specs/unit/TaskServiceSpec.bx` (9 specs covering create defaults / missing field / invalid priority / invalid assignee / cross-project status / update round-trip / completed_at toggle / soft delete round-trip / sort order) and `tests/specs/unit/SubtaskServiceSpec.bx` (6 specs covering create / completed-on-create / invalid assignee / completion toggle / soft delete round-trip / sort order).
+- `InstallSpec.bx` adds 5 new WireBox-binding probes for ProjectStatusService, TaskService, SubtaskService, TaskDto, SubtaskDto. 23 specs total.
+- Deferred to Phase 2c: per-project ProjectStatus CRUD UI (rename / recolor / reorder / add); REST API handlers under `/api/v1/pm/*` and the `apiResources` manifest; `config/cbSecurity.bx` per-action `pm.*` permission gating; handler integration tests; assignee-picker (Phase 2b uses a paste-a-UUID input).
+
 ### Phase 2a: Project CRUD on the Agent Surface
 
 - `entryPoint` changed from `tesserabx-pm` to `agent/pm` (multi-segment, mirrors the host's nested admin module). PM's own `config/Router.bx` now naturally handles every `/agent/pm/*` URL; the agent firewall covers them by URL regex.

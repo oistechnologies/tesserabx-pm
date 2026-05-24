@@ -1,0 +1,238 @@
+/**
+ * TaskServiceSpec: CRUD coverage for the Phase 2b Task surface.
+ *
+ * Each spec spins up its own organization + project fixture and
+ * tears down via the organizations CASCADE. ProjectService's
+ * createProject auto-hydrates the 5 default statuses (Backlog,
+ * To Do, In Progress, In Review, Done) from the shared "Standard
+ * Workflow" template seeded by the Phase 1 migration, so every
+ * created project ships with a kanban out of the box.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.statusSvc  = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+        variables.svc        = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "TaskService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute(
+                        "DELETE FROM organizations WHERE id = :id",
+                        { id : orgId }
+                    );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createTask defaults to the project's default status when none supplied", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "First task"
+                } );
+                expect( task.getId() ).notToBeEmpty();
+                expect( task.getProjectId() ).toBe( ctx.project.getId() );
+                expect( task.getOrganizationId() ).toBe( ctx.orgId );
+                expect( task.getStatusId() ).notToBeEmpty();
+                // Default status from the Standard Workflow seed is "Backlog".
+                var s = variables.statusSvc.getStatus( task.getStatusId() );
+                expect( s.getName() ).toBe( "Backlog" );
+            } );
+
+            it( "createTask rejects a missing title", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createTask( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId
+                    } );
+                } ).toThrow( type = "TaskService.MissingField" );
+            } );
+
+            it( "createTask rejects an unknown priority", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createTask( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        title          : "bad",
+                        priority       : "stat"
+                    } );
+                } ).toThrow( type = "TaskService.InvalidPriority" );
+            } );
+
+            it( "createTask rejects a half-populated polymorphic assignee", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createTask( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        title          : "bad",
+                        assigneeType   : "agent"
+                    } );
+                } ).toThrow( type = "TaskService.InvalidAssignee" );
+            } );
+
+            it( "createTask accepts a fully-populated (type, id) assignee pair", function(){
+                // Regression for the validateAssignee bug where the
+                // service compared `len(type)` to `len(id)` instead of
+                // booleans, rejecting valid pairs whose strings had
+                // different lengths (e.g. 'agent' vs a 36-char UUID).
+                var ctx = setupProject( fixtureOrgIds );
+                var assigneeId = createUUID();
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "with assignee",
+                    assigneeType   : "agent",
+                    assigneeId     : assigneeId
+                } );
+                expect( task.getAssigneeType() ).toBe( "agent" );
+                expect( task.getAssigneeId()   ).toBe( assigneeId );
+            } );
+
+            it( "createTask rejects an unknown assignee type", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createTask( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        title          : "bad type",
+                        assigneeType   : "robot",
+                        assigneeId     : createUUID()
+                    } );
+                } ).toThrow( type = "TaskService.InvalidAssignee" );
+            } );
+
+            it( "createTask rejects a status that belongs to a different project", function(){
+                var ctxA = setupProject( fixtureOrgIds );
+                var ctxB = setupProject( fixtureOrgIds );
+                // Pull a status from project A.
+                var foreignStatus = variables.statusSvc.listForProject( ctxA.project.getId() )[ 1 ];
+                expect( function(){
+                    variables.svc.createTask( {
+                        projectId      : ctxB.project.getId(),
+                        organizationId : ctxB.orgId,
+                        title          : "cross-project status",
+                        statusId       : foreignStatus.getId()
+                    } );
+                } ).toThrow( type = "TaskService.InvalidStatus" );
+            } );
+
+            it( "updateTask round-trips title/description/priority", function(){
+                var ctx  = setupProject( fixtureOrgIds );
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "Initial"
+                } );
+                variables.svc.updateTask( task.getId(), {
+                    title       : "Renamed",
+                    description : "Updated desc",
+                    priority    : "high"
+                } );
+                var fresh = variables.svc.getTask( task.getId() );
+                expect( fresh.getTitle() ).toBe( "Renamed" );
+                expect( fresh.getDescription() ).toBe( "Updated desc" );
+                expect( fresh.getPriority() ).toBe( "high" );
+            } );
+
+            it( "moving into a completed status stamps completed_at", function(){
+                var ctx       = setupProject( fixtureOrgIds );
+                var statuses  = variables.statusSvc.listForProject( ctx.project.getId() );
+                var doneRow   = "";
+                for ( var s in statuses ) {
+                    if ( !!s.getIsCompleted() ) doneRow = s;
+                }
+                expect( isSimpleValue( doneRow ) ).toBeFalse( "Standard Workflow seed should include a completed status." );
+
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "Will complete"
+                } );
+                expect( toString( task.getCompletedAt() ?: "" ) ).toBe( "" );
+
+                variables.svc.updateTask( task.getId(), { statusId : doneRow.getId() } );
+                var fresh = variables.svc.getTask( task.getId() );
+                expect( fresh.getStatusId() ).toBe( doneRow.getId() );
+                expect( toString( fresh.getCompletedAt() ?: "" ) ).notToBeEmpty( "completed_at should be stamped when entering a completed status." );
+
+                // Moving back to Backlog clears completed_at.
+                var backlog = statuses[ 1 ];
+                variables.svc.updateTask( task.getId(), { statusId : backlog.getId() } );
+                var reopened = variables.svc.getTask( task.getId() );
+                expect( toString( reopened.getCompletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "removeTask soft-deletes and restoreTask clears deleted_at", function(){
+                var ctx  = setupProject( fixtureOrgIds );
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "Soft delete cycle"
+                } );
+                variables.svc.removeTask( task.getId() );
+                expect( variables.svc.getTask( task.getId() ) ).toBeNull();
+
+                variables.svc.restoreTask( task.getId() );
+                var restored = variables.svc.getTask( task.getId() );
+                expect( restored ).notToBeNull();
+                expect( toString( restored.getDeletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "listForProject returns tasks ordered by sort_order then created_at", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var t1  = variables.svc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "A", sortOrder : 10 } );
+                var t2  = variables.svc.createTask( { projectId : ctx.project.getId(), organizationId : ctx.orgId, title : "B", sortOrder : 5  } );
+
+                var rows = variables.svc.listForProject( ctx.project.getId() );
+                expect( arrayLen( rows ) gte 2 ).toBeTrue();
+                // t2 has lower sort_order so it should come first
+                var idsInOrder = rows.map( ( t ) => t.getId() );
+                var idxA = arrayFindNoCase( idsInOrder, t1.getId() );
+                var idxB = arrayFindNoCase( idsInOrder, t2.getId() );
+                expect( idxB lt idxA ).toBeTrue( "Lower sort_order should sort first." );
+            } );
+
+        } );
+    }
+
+    // ---------- fixture helpers ----------
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var orgId   = newOrg( fixtureOrgIds );
+        var project = variables.projectSvc.createProject( {
+            organizationId : orgId,
+            name           : "task-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        return { orgId : orgId, project : project };
+    }
+
+    private string function newOrg( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            {
+                id   : orgId,
+                name : "tsvc-" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                slug : "tsvc-" & lCase( replace( createUUID(), "-", "", "all" ) )
+            }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        return orgId;
+    }
+
+}

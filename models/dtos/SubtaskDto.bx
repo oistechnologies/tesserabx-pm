@@ -1,0 +1,35 @@
+/**
+ * SubtaskDto: maps a Subtask entity to a snake_case struct.
+ *
+ * Same shape conventions as TaskDto / ProjectDto.
+ */
+class singleton=true {
+
+    public struct function fromSubtask( required any entity ){
+        var s = arguments.entity;
+        return {
+            id              : s.getId(),
+            task_id         : s.getTaskId()         ?: "",
+            organization_id : s.getOrganizationId() ?: "",
+            title           : s.getTitle()          ?: "",
+            description     : s.getDescription()    ?: "",
+            assignee_type   : s.getAssigneeType()   ?: "",
+            assignee_id     : s.getAssigneeId()     ?: "",
+            due_date        : toString( s.getDueDate()        ?: "" ),
+            estimated_hours : s.getEstimatedHours() ?: javaCast( "null", "" ),
+            is_completed    : !!s.getIsCompleted(),
+            completed_at    : toString( s.getCompletedAt()    ?: "" ),
+            sort_order      : int( val( s.getSortOrder() ?: 0 ) ),
+            created_by_type : s.getCreatedByType()  ?: "",
+            created_by_id   : s.getCreatedById()    ?: "",
+            created_at      : toString( s.getCreatedAt() ?: "" ),
+            updated_at      : toString( s.getUpdatedAt() ?: "" ),
+            deleted_at      : toString( s.getDeletedAt() ?: "" )
+        };
+    }
+
+    public array function fromSubtaskArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromSubtask( e ) );
+    }
+
+}

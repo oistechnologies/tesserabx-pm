@@ -33,9 +33,17 @@ class singleton=true {
     property name="interceptorService"   inject="coldbox:interceptorService";
     property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
     property name="auditService"         inject="AuditService@audit";
+    property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
 
     variables.VALID_VISIBILITY_SCOPES = [ "all_org_members", "specific_members" ];
     variables.VALID_LIFECYCLE         = [ "active", "archived", "completed" ];
+
+    // The seeded shared template (see migration
+    // 2026_05_24_000300_seed_pm_default_project_template.cfc). New
+    // projects without an explicit templateSourceId hydrate from
+    // this template's `structure_json.statuses` array so every
+    // project has a usable kanban out of the box.
+    variables.STANDARD_WORKFLOW_TEMPLATE_ID = "00000000-0000-0000-0000-00000000pm01";
 
     // ---------------------------------------------------------------
     // Reads
@@ -123,6 +131,28 @@ class singleton=true {
         project.setUpdatedByType(       arguments.data.actorType ?: "system" );
         project.setUpdatedById(         arguments.data.actorId   ?: javaCast( "null", "" ) );
         project.save();
+
+        // Seed default kanban statuses from the shared "Standard
+        // Workflow" template so the new project ships with a
+        // usable board out of the box. Phase 7 TemplateService
+        // takes over template selection; until then every project
+        // gets the canonical 5-column workflow.
+        var templateId = len( arguments.data.templateSourceId ?: "" )
+            ? arguments.data.templateSourceId
+            : variables.STANDARD_WORKFLOW_TEMPLATE_ID;
+        try {
+            projectStatusService.hydrateFromTemplate(
+                projectId      = project.getId(),
+                organizationId = project.getOrganizationId(),
+                templateId     = templateId
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "ProjectService.createProject hydrateFromTemplate failed for [#project.getId()#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
 
         announceLifecycleEvent(
             eventName : "onPmProjectCreated",

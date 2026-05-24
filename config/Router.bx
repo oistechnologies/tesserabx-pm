@@ -23,8 +23,8 @@ class {
         // /agent/pm landing -> Projects.index
         route( "/" ).to( "Projects.index" );
 
-        // Project CRUD. Most-specific patterns first so /projects/new
-        // and /projects/:id/* do not collide with /projects/:id.
+        // ---- Project CRUD. Most-specific patterns first.
+
         route( "projects/new" ).withHandler( "Projects" ).toAction( {
             "GET"  : "new",
             "POST" : "create"
@@ -33,11 +33,44 @@ class {
         route( "projects/:id/restore" ).withVerbs( "POST" ).to( "Projects.restore" );
         route( "projects/:id/delete"  ).withVerbs( "POST" ).to( "Projects.remove" );
         route( "projects/:id/edit"    ).to( "Projects.edit" );
-        route( "projects/:id"         ).withHandler( "Projects" ).toAction( {
+
+        // Tasks nested under their project for create (list + form
+        // know the parent project context); show / edit / mutation
+        // live under /agent/pm/tasks/:id because task ids are
+        // unique UUIDs and the URL stays compact.
+        route( "projects/:projectId/tasks/new" ).withHandler( "Tasks" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
+        route( "projects/:projectId/tasks" ).to( "Tasks.index" );
+
+        route( "projects/:id" ).withHandler( "Projects" ).toAction( {
             "GET"  : "show",
             "POST" : "update"
         } );
         route( "projects" ).to( "Projects.index" );
+
+        // ---- Task mutation routes (by task id, not nested).
+
+        route( "tasks/:id/delete"   ).withVerbs( "POST" ).to( "Tasks.remove" );
+        route( "tasks/:id/restore"  ).withVerbs( "POST" ).to( "Tasks.restore" );
+        route( "tasks/:id/edit"     ).to( "Tasks.edit" );
+        route( "tasks/:id/subtasks/new" ).withHandler( "Subtasks" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
+        route( "tasks/:id" ).withHandler( "Tasks" ).toAction( {
+            "GET"  : "show",
+            "POST" : "update"
+        } );
+
+        // ---- Subtask mutation routes (by subtask id).
+
+        route( "subtasks/:id/delete"   ).withVerbs( "POST" ).to( "Subtasks.remove" );
+        route( "subtasks/:id/complete" ).withVerbs( "POST" ).to( "Subtasks.complete" );
+        route( "subtasks/:id/reopen"   ).withVerbs( "POST" ).to( "Subtasks.reopen" );
+        route( "subtasks/:id/edit"     ).to( "Subtasks.edit" );
+        route( "subtasks/:id"          ).withVerbs( "POST" ).to( "Subtasks.update" );
     }
 
 }

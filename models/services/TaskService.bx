@@ -1,0 +1,371 @@
+/**
+ * TaskService: CRUD over pm_tasks.
+ *
+ * Tasks live on the kanban board and carry full lifecycle:
+ * polymorphic assignee (agent | contact per BUILD-PLAN §3.4),
+ * status link to a per-project column, optional due_date and
+ * estimated_hours, labels (Phase 6), comments (Phase 4), embeddings
+ * (Phase 12), time logs (Phase 5), and ticket links (Phase 8).
+ *
+ * The service owns business logic only. Handlers gate access via
+ * the host's agent firewall + PM's per-action permissions; the
+ * portal surface routes through VisibilityService for Option C.
+ *
+ * Notable invariants enforced here:
+ *
+ *   - assignee_type, when set, is exactly one of "agent" or
+ *     "contact". Setting only one column out of the pair is
+ *     rejected; both columns must be either populated or both
+ *     empty.
+ *
+ *   - is_client_visible defaults false (BUILD-PLAN §3.3 Option C
+ *     visibility). Agents may toggle it on for tasks they want
+ *     contacts to see regardless of assignment.
+ *
+ *   - completed_at is set automatically when a task moves into a
+ *     status with is_completed=true, and cleared when it moves
+ *     away. The status entity is loaded once per write.
+ *
+ *   - Soft delete via deleted_at; archive lives on the project,
+ *     not the task. BUILD-PLAN §3.13.
+ *
+ * Events emitted (subset of BUILD-PLAN §3.11 + §9 Phase 4):
+ *   onPmTaskCreated      (async)
+ *   onPmTaskAssigned     (async, when assignee changes)
+ *   onPmTaskStatusChanged (sync, so the close-on-complete
+ *                         listener in Phase 8 can react in-band)
+ *   onPmTaskCompleted    (async, when moving into a completed
+ *                         status)
+ */
+class singleton=true {
+
+    property name="wirebox"              inject="wirebox";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+    property name="auditService"         inject="AuditService@audit";
+    property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+
+    variables.VALID_PRIORITIES     = [ "low", "medium", "high", "urgent" ];
+    variables.VALID_ASSIGNEE_TYPES = [ "agent", "contact" ];
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    public any function getTask( required string id ){
+        var t = wirebox.getInstance( "Task@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .whereNull( "deleted_at" )
+            .first();
+        return isNull( t ) ? javaCast( "null", "" ) : t;
+    }
+
+    public array function listForProject(
+        required string projectId,
+        string statusId        = "",
+        string assigneeType    = "",
+        string assigneeId      = "",
+        string priority        = "",
+        string search          = "",
+        boolean includeDeleted = false,
+        numeric limit          = 200,
+        numeric offset         = 0
+    ){
+        var q = wirebox.getInstance( "Task@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId );
+        if ( !arguments.includeDeleted ) q = q.whereNull( "deleted_at" );
+        if ( len( arguments.statusId )     ) q = q.where( "status_id", arguments.statusId );
+        if ( len( arguments.assigneeType ) ) q = q.where( "assignee_type", arguments.assigneeType );
+        if ( len( arguments.assigneeId )   ) q = q.where( "assignee_id",   arguments.assigneeId );
+        if ( len( arguments.priority )     ) q = q.where( "priority",      arguments.priority );
+        if ( len( arguments.search )       ) q = q.whereLike( "title", "%" & arguments.search & "%" );
+        return q.orderBy( "sort_order", "asc" )
+                .orderBy( "created_at", "desc" )
+                .limit(  arguments.limit )
+                .offset( arguments.offset )
+                .get();
+    }
+
+    // ---------------------------------------------------------------
+    // Writes
+    // ---------------------------------------------------------------
+
+    public any function createTask( required struct data ){
+        if ( !len( arguments.data.projectId ?: "" ) )      throw( type = "TaskService.MissingField", message = "projectId is required to create a task." );
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "TaskService.MissingField", message = "organizationId is required to create a task." );
+        if ( !len( arguments.data.title ?: "" ) )          throw( type = "TaskService.MissingField", message = "title is required to create a task." );
+
+        var priority = arguments.data.priority ?: "medium";
+        if ( !arrayContains( variables.VALID_PRIORITIES, priority ) ) {
+            throw( type = "TaskService.InvalidPriority", message = "priority must be one of #arrayToList( variables.VALID_PRIORITIES )#." );
+        }
+
+        // Polymorphic assignee guard. Either both columns are set
+        // or both are empty.
+        validateAssignee( arguments.data.assigneeType ?: "", arguments.data.assigneeId ?: "" );
+
+        // Resolve the status. If the caller did not pass one, use
+        // the project's default; otherwise verify the supplied
+        // status belongs to the project.
+        var statusId  = "";
+        var statusRow = "";
+        if ( len( arguments.data.statusId ?: "" ) ) {
+            statusRow = projectStatusService.getStatus( arguments.data.statusId );
+            if ( isNull( statusRow ) || statusRow.getProjectId() != arguments.data.projectId ) {
+                throw( type = "TaskService.InvalidStatus", message = "Status [#arguments.data.statusId#] does not belong to project [#arguments.data.projectId#]." );
+            }
+            statusId = statusRow.getId();
+        } else {
+            statusRow = projectStatusService.defaultStatusForProject( arguments.data.projectId );
+            if ( !isNull( statusRow ) ) statusId = statusRow.getId();
+        }
+
+        var task = wirebox.getInstance( "Task@tesserabx-pm" );
+        task.setId(               createUUID() );
+        task.setProjectId(        arguments.data.projectId );
+        task.setOrganizationId(   arguments.data.organizationId );
+        task.setStatusId(         len( statusId ) ? statusId : javaCast( "null", "" ) );
+        task.setTitle(            arguments.data.title );
+        task.setDescription(      arguments.data.description     ?: "" );
+        task.setPriority(         priority );
+        task.setAssigneeType(     len( arguments.data.assigneeType ?: "" ) ? arguments.data.assigneeType : javaCast( "null", "" ) );
+        task.setAssigneeId(       len( arguments.data.assigneeId   ?: "" ) ? arguments.data.assigneeId   : javaCast( "null", "" ) );
+        task.setStartDate(        arguments.data.startDate      ?: javaCast( "null", "" ) );
+        task.setDueDate(          arguments.data.dueDate        ?: javaCast( "null", "" ) );
+        task.setEstimatedHours(   isNumeric( arguments.data.estimatedHours ?: "" ) ? arguments.data.estimatedHours : javaCast( "null", "" ) );
+        task.setIsClientVisible(  !!( arguments.data.isClientVisible ?: false ) );
+        task.setSortOrder(        int( val( arguments.data.sortOrder ?: 0 ) ) );
+        task.setCompletedAt(      ( !isNull( statusRow ) && !!statusRow.getIsCompleted() ) ? now() : javaCast( "null", "" ) );
+        task.setCreatedByType(    arguments.data.actorType ?: "system" );
+        task.setCreatedById(      arguments.data.actorId   ?: javaCast( "null", "" ) );
+        task.save();
+
+        announceLifecycleEvent(
+            eventName : "onPmTaskCreated",
+            task      : task,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: "system",
+            metadata  : {}
+        );
+        if ( len( task.getAssigneeId() ?: "" ) ) {
+            announceLifecycleEvent(
+                eventName : "onPmTaskAssigned",
+                task      : task,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: "system",
+                metadata  : {
+                    assigneeType : task.getAssigneeType(),
+                    assigneeId   : task.getAssigneeId()
+                }
+            );
+        }
+
+        return task;
+    }
+
+    /**
+     * Update a task. Tracks status transitions so it can emit
+     * onPmTaskStatusChanged (sync) and onPmTaskCompleted (async)
+     * when the task crosses into or out of a completed status.
+     */
+    public any function updateTask( required string id, required struct data ){
+        var task = getTask( arguments.id );
+        if ( isNull( task ) ) throw( type = "TaskService.UnknownTask", message = "No task with id [#arguments.id#]." );
+
+        var beforeStatusId = task.getStatusId() ?: "";
+        var beforeAssigneeType = task.getAssigneeType() ?: "";
+        var beforeAssigneeId   = task.getAssigneeId()   ?: "";
+
+        if ( structKeyExists( arguments.data, "title"           ) ) task.setTitle(           arguments.data.title );
+        if ( structKeyExists( arguments.data, "description"     ) ) task.setDescription(     arguments.data.description );
+        if ( structKeyExists( arguments.data, "priority"        ) ) {
+            if ( !arrayContains( variables.VALID_PRIORITIES, arguments.data.priority ) ) {
+                throw( type = "TaskService.InvalidPriority", message = "priority must be one of #arrayToList( variables.VALID_PRIORITIES )#." );
+            }
+            task.setPriority( arguments.data.priority );
+        }
+        if ( structKeyExists( arguments.data, "assigneeType" ) || structKeyExists( arguments.data, "assigneeId" ) ) {
+            var at = arguments.data.assigneeType ?: "";
+            var ai = arguments.data.assigneeId   ?: "";
+            validateAssignee( at, ai );
+            task.setAssigneeType( len( at ) ? at : javaCast( "null", "" ) );
+            task.setAssigneeId(   len( ai ) ? ai : javaCast( "null", "" ) );
+        }
+        if ( structKeyExists( arguments.data, "startDate"        ) ) task.setStartDate(        arguments.data.startDate );
+        if ( structKeyExists( arguments.data, "dueDate"          ) ) task.setDueDate(          arguments.data.dueDate );
+        if ( structKeyExists( arguments.data, "estimatedHours"   ) ) task.setEstimatedHours(   isNumeric( arguments.data.estimatedHours ?: "" ) ? arguments.data.estimatedHours : javaCast( "null", "" ) );
+        if ( structKeyExists( arguments.data, "isClientVisible"  ) ) task.setIsClientVisible(  !!arguments.data.isClientVisible );
+        if ( structKeyExists( arguments.data, "sortOrder"        ) ) task.setSortOrder(        int( val( arguments.data.sortOrder ) ) );
+
+        // Status change resolution. Validate that the new status
+        // (if supplied) belongs to the task's project; toggle
+        // completed_at on the transition into / out of a
+        // completed status.
+        var newStatusRow = "";
+        var transitioningStatus = false;
+        if ( structKeyExists( arguments.data, "statusId" ) ) {
+            var newStatusId = arguments.data.statusId ?: "";
+            if ( newStatusId != beforeStatusId ) {
+                transitioningStatus = true;
+                if ( len( newStatusId ) ) {
+                    newStatusRow = projectStatusService.getStatus( newStatusId );
+                    if ( isNull( newStatusRow ) || newStatusRow.getProjectId() != task.getProjectId() ) {
+                        throw( type = "TaskService.InvalidStatus", message = "Status [#newStatusId#] does not belong to project [#task.getProjectId()#]." );
+                    }
+                    task.setStatusId( newStatusId );
+                    if ( !!newStatusRow.getIsCompleted() ) {
+                        task.setCompletedAt( now() );
+                    } else {
+                        // Quick's setter + save() does not reliably
+                        // persist NULL into a timestamp column; use a
+                        // direct UPDATE for the clear and bypass the
+                        // entity-managed value so the subsequent save
+                        // does not re-stamp.
+                        task.setCompletedAt( javaCast( "null", "" ) );
+                    }
+                } else {
+                    task.setStatusId(    javaCast( "null", "" ) );
+                    task.setCompletedAt( javaCast( "null", "" ) );
+                }
+            }
+        }
+
+        task.save();
+
+        // Workaround for Quick's NULL-binding behavior on
+        // timestamp columns: when the new status is not a
+        // completed one, force completed_at to NULL via direct
+        // SQL after the entity save.
+        if ( transitioningStatus
+          && ( isNull( newStatusRow ) || !newStatusRow.getIsCompleted() ) ) {
+            queryExecute(
+                "UPDATE pm_tasks SET completed_at = NULL WHERE id = :id",
+                { id : task.getId() }
+            );
+        }
+
+        // Sync event for the close-on-complete listener (Phase 8)
+        // to react to status changes during the same request.
+        if ( transitioningStatus ) {
+            announceLifecycleEvent(
+                eventName : "onPmTaskStatusChanged",
+                task      : task,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: "system",
+                metadata  : { fromStatusId : beforeStatusId, toStatusId : task.getStatusId() ?: "" },
+                async     : false
+            );
+            if ( !isNull( newStatusRow ) && !!newStatusRow.getIsCompleted() ) {
+                announceLifecycleEvent(
+                    eventName : "onPmTaskCompleted",
+                    task      : task,
+                    actorType : arguments.data.actorType ?: "system",
+                    actorId   : arguments.data.actorId   ?: "system",
+                    metadata  : {}
+                );
+            }
+        }
+
+        // Assignee change emits its own event so notification fan-
+        // out can target the new assignee.
+        if ( ( task.getAssigneeType() ?: "" ) != beforeAssigneeType
+          || ( task.getAssigneeId()   ?: "" ) != beforeAssigneeId ) {
+            announceLifecycleEvent(
+                eventName : "onPmTaskAssigned",
+                task      : task,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: "system",
+                metadata  : {
+                    assigneeType : task.getAssigneeType() ?: "",
+                    assigneeId   : task.getAssigneeId()   ?: ""
+                }
+            );
+        }
+
+        return task;
+    }
+
+    /**
+     * Soft-delete by stamping deleted_at. Use restoreTask() to
+     * undo.
+     */
+    public any function removeTask( required string id, struct data = {} ){
+        var task = getTask( arguments.id );
+        if ( isNull( task ) ) throw( type = "TaskService.UnknownTask", message = "No task with id [#arguments.id#]." );
+
+        task.setDeletedAt( now() );
+        task.save();
+        return task;
+    }
+
+    public any function restoreTask( required string id, struct data = {} ){
+        // Pull without the deleted_at filter so soft-deleted rows
+        // are reachable.
+        var task = wirebox.getInstance( "Task@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        if ( isNull( task ) ) throw( type = "TaskService.UnknownTask", message = "No task with id [#arguments.id#]." );
+
+        queryExecute(
+            "UPDATE pm_tasks
+             SET    deleted_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+             WHERE  id = :id",
+            { id : arguments.id }
+        );
+        return getTask( arguments.id );
+    }
+
+    // ---------- internals ----------
+
+    private void function validateAssignee( required string typeArg, required string idArg ){
+        var hasType = len( arguments.typeArg ) > 0;
+        var hasId   = len( arguments.idArg )   > 0;
+        if ( hasType != hasId ) {
+            throw(
+                type    = "TaskService.InvalidAssignee",
+                message = "assignee_type and assignee_id must be both set or both empty."
+            );
+        }
+        if ( hasType && !arrayContains( variables.VALID_ASSIGNEE_TYPES, arguments.typeArg ) ) {
+            throw(
+                type    = "TaskService.InvalidAssignee",
+                message = "assignee_type must be one of #arrayToList( variables.VALID_ASSIGNEE_TYPES )# (got [#arguments.typeArg#])."
+            );
+        }
+    }
+
+    private void function announceLifecycleEvent(
+        required string eventName,
+        required any task,
+        required string actorType,
+        required string actorId,
+        struct metadata     = {},
+        boolean async       = true
+    ){
+        try {
+            interceptorService.announce(
+                arguments.eventName,
+                eventPayloadBuilder.build(
+                    event          : arguments.eventName,
+                    organizationId : arguments.task.getOrganizationId() ?: "",
+                    actorType      : arguments.actorType,
+                    actorId        : arguments.actorId,
+                    entity         : { type : "Task", id : arguments.task.getId() },
+                    metadata       : arguments.metadata
+                ),
+                arguments.async
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TaskService.announceLifecycleEvent failed for [#arguments.eventName#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

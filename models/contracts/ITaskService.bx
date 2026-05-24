@@ -1,0 +1,67 @@
+/**
+ * ITaskService: documented public surface of
+ * TaskService@tesserabx-pm.
+ *
+ * BoxLang has no `interface` keyword, so this is a documentation
+ * contract: a regular class with the public method signatures
+ * cross-module callers may rely on. Method bodies throw on direct
+ * use — resolve the live implementation through WireBox:
+ *
+ *     var ts = wirebox.getInstance( "TaskService@tesserabx-pm" );
+ *
+ * Pattern mirrors the host's ITicketsService@tickets contract.
+ */
+class {
+
+    public any function getTask( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "ITaskService is a contract; resolve TaskService@tesserabx-pm." );
+    }
+
+    public array function listForProject(
+        required string projectId,
+        string statusId        = "",
+        string assigneeType    = "",
+        string assigneeId      = "",
+        string priority        = "",
+        string search          = "",
+        boolean includeDeleted = false,
+        numeric limit          = 200,
+        numeric offset         = 0
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "ITaskService is a contract; resolve TaskService@tesserabx-pm." );
+    }
+
+    /**
+     * Create a task. Required keys in `data`:
+     *   - projectId      (uuid)
+     *   - organizationId (uuid)
+     *   - title          (string)
+     * Optional keys:
+     *   - statusId        (uuid; falls back to the project's default)
+     *   - description     (string)
+     *   - priority        ("low" | "medium" | "high" | "urgent")
+     *   - assigneeType    ("agent" | "contact")
+     *   - assigneeId      (uuid; paired with assigneeType)
+     *   - startDate / dueDate (date strings)
+     *   - estimatedHours  (numeric)
+     *   - isClientVisible (boolean)
+     *   - sortOrder       (integer)
+     *   - actorType / actorId (the writer)
+     */
+    public any function createTask( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITaskService is a contract; resolve TaskService@tesserabx-pm." );
+    }
+
+    public any function updateTask( required string id, required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITaskService is a contract; resolve TaskService@tesserabx-pm." );
+    }
+
+    public any function removeTask( required string id, struct data = {} ){
+        throw( type = "ContractClass.NotImplemented", message = "ITaskService is a contract; resolve TaskService@tesserabx-pm." );
+    }
+
+    public any function restoreTask( required string id, struct data = {} ){
+        throw( type = "ContractClass.NotImplemented", message = "ITaskService is a contract; resolve TaskService@tesserabx-pm." );
+    }
+
+}

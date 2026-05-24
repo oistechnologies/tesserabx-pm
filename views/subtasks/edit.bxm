@@ -1,0 +1,71 @@
+<bx:output>
+<bx:set local.task = prc.task >
+<bx:set local.s    = prc.subtask >
+
+<div class="container-fluid">
+	<nav aria-label="breadcrumb" class="mb-2">
+		<ol class="breadcrumb mb-0 small">
+			<li class="breadcrumb-item"><a href="/agent/pm/tasks/#encodeForURL( local.task.getId() )#" class="link-secondary">#encodeForHTML( local.task.getTitle() )#</a></li>
+			<li class="breadcrumb-item active" aria-current="page">Edit subtask</li>
+		</ol>
+	</nav>
+
+	<h1 class="mb-3 fs-3">Edit subtask</h1>
+
+	<bx:if arrayLen( prc.formErrors ?: [] )>
+		<div class="alert alert-danger">
+			<ul class="mb-0"><bx:loop array="#prc.formErrors#" item="err"><li>#encodeForHTML( err.message )#</li></bx:loop></ul>
+		</div>
+	</bx:if>
+
+	<form method="post" action="/agent/pm/subtasks/#encodeForURL( local.s.getId() )#" class="card">
+		<div class="card-body">
+			<div class="row g-3">
+				<div class="col-12">
+					<label class="form-label" for="title">Title <span class="text-danger">*</span></label>
+					<input type="text" class="form-control" id="title" name="title" required maxlength="500"
+						value="#encodeForHTMLAttribute( prc.formData.title ?: "" )#">
+				</div>
+				<div class="col-12">
+					<label class="form-label" for="description">Description</label>
+					<textarea class="form-control" id="description" name="description" rows="3">#encodeForHTML( prc.formData.description ?: "" )#</textarea>
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="dueDate">Due date</label>
+					<input type="date" class="form-control" id="dueDate" name="dueDate"
+						value="#encodeForHTMLAttribute( prc.formData.dueDate ?: "" )#">
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="estimatedHours">Estimated hours</label>
+					<input type="number" step="0.25" min="0" class="form-control" id="estimatedHours" name="estimatedHours"
+						value="#encodeForHTMLAttribute( prc.formData.estimatedHours ?: "" )#">
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="assigneeType">Assignee type</label>
+					<select class="form-select" id="assigneeType" name="assigneeType">
+						<option value="">(unassigned)</option>
+						<option value="agent"   <bx:if ( prc.formData.assigneeType ?: "" ) eq "agent">  selected</bx:if>>agent</option>
+						<option value="contact" <bx:if ( prc.formData.assigneeType ?: "" ) eq "contact">selected</bx:if>>contact</option>
+					</select>
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="assigneeId">Assignee id</label>
+					<input type="text" class="form-control font-monospace" id="assigneeId" name="assigneeId"
+						value="#encodeForHTMLAttribute( prc.formData.assigneeId ?: "" )#">
+				</div>
+				<div class="col-12">
+					<div class="form-check">
+						<input class="form-check-input" type="checkbox" id="isCompleted" name="isCompleted" value="true"
+							<bx:if prc.formData.isCompleted ?: false> checked</bx:if>>
+						<label class="form-check-label" for="isCompleted">Completed</label>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="card-footer d-flex justify-content-end gap-2">
+			<a class="btn btn-outline-secondary" href="/agent/pm/tasks/#encodeForURL( local.task.getId() )#">Cancel</a>
+			<button class="btn btn-primary" type="submit"><i class="bi bi-check-lg"></i> Save changes</button>
+		</div>
+	</form>
+</div>
+</bx:output>

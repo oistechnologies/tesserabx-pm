@@ -1,0 +1,231 @@
+/**
+ * Agent-surface Subtasks handler.
+ *
+ * Subtasks are lightweight children of Task per BUILD-PLAN §3.1.
+ * They render inline on the task detail page; this handler covers
+ * the create form (its own page) plus the mutation endpoints
+ * called from inline buttons on the task view.
+ *
+ * Routes (declared in config/Router.bx, auto-prefixed with
+ * /agent/pm):
+ *
+ *   GET  /tasks/:id/subtasks/new  -> new      (form, parent task in context)
+ *   POST /tasks/:id/subtasks/new  -> create
+ *   GET  /subtasks/:id/edit        -> edit
+ *   POST /subtasks/:id             -> update
+ *   POST /subtasks/:id/complete    -> complete   (sets is_completed=true)
+ *   POST /subtasks/:id/reopen      -> reopen     (sets is_completed=false)
+ *   POST /subtasks/:id/delete      -> remove     (soft delete)
+ */
+class {
+
+    property name="subtaskService" inject="SubtaskService@tesserabx-pm";
+    property name="taskService"    inject="TaskService@tesserabx-pm";
+    property name="projectService" inject="ProjectService@tesserabx-pm";
+    property name="messagebox"     inject="messagebox@cbmessagebox";
+    property name="auth"           inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+        prc.viewer = currentViewer();
+    }
+
+    // ---------------------------------------------------------------
+    // Create
+    // ---------------------------------------------------------------
+
+    function new( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        prc.pageTitle  = "New subtask";
+        prc.task       = task;
+        prc.formData   = formDataDefaults( rc );
+        prc.formErrors = prc.formErrors ?: [];
+        event.setView( view = "subtasks/new", module = "tesserabx-pm" );
+    }
+
+    function create( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var data = collectFormData( rc );
+        data.taskId         = task.getId();
+        data.organizationId = task.getOrganizationId();
+        data.actorType      = prc.viewer.accountType ?: "agent";
+        data.actorId        = prc.viewer.accountId   ?: "";
+
+        try {
+            subtaskService.createSubtask( data );
+            messagebox.info( "Subtask created." );
+            relocate( uri = "/agent/pm/tasks/" & task.getId() );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            prc.task       = task;
+            prc.formData   = data;
+            prc.formErrors = [ { field : "", message : e.message } ];
+            event.setView( view = "subtasks/new", module = "tesserabx-pm" );
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Edit / Update / Complete / Reopen / Remove
+    // ---------------------------------------------------------------
+
+    function edit( event, rc, prc ){
+        var subtask = subtaskService.getSubtask( rc.id ?: "" );
+        if ( isNull( subtask ) ) {
+            messagebox.warn( "That subtask does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        var task = taskService.getTask( subtask.getTaskId() );
+
+        prc.pageTitle  = "Edit subtask";
+        prc.subtask    = subtask;
+        prc.task       = task;
+        prc.formData   = subtaskToFormData( subtask );
+        prc.formErrors = prc.formErrors ?: [];
+        event.setView( view = "subtasks/edit", module = "tesserabx-pm" );
+    }
+
+    function update( event, rc, prc ){
+        var subtask = subtaskService.getSubtask( rc.id ?: "" );
+        if ( isNull( subtask ) ) {
+            messagebox.warn( "That subtask does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var data = collectFormData( rc );
+        data.actorType = prc.viewer.accountType ?: "agent";
+        data.actorId   = prc.viewer.accountId   ?: "";
+
+        try {
+            subtaskService.updateSubtask( subtask.getId(), data );
+            messagebox.info( "Subtask updated." );
+            relocate( uri = "/agent/pm/tasks/" & subtask.getTaskId() );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            var task       = taskService.getTask( subtask.getTaskId() );
+            prc.subtask    = subtask;
+            prc.task       = task;
+            prc.formData   = data;
+            prc.formErrors = [ { field : "", message : e.message } ];
+            event.setView( view = "subtasks/edit", module = "tesserabx-pm" );
+        }
+    }
+
+    function complete( event, rc, prc ){
+        toggleCompletion( event, rc, prc, true );
+    }
+
+    function reopen( event, rc, prc ){
+        toggleCompletion( event, rc, prc, false );
+    }
+
+    function remove( event, rc, prc ){
+        var subtask = subtaskService.getSubtask( rc.id ?: "" );
+        if ( isNull( subtask ) ) {
+            messagebox.warn( "That subtask does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        try {
+            subtaskService.removeSubtask( subtask.getId() );
+            messagebox.info( "Subtask deleted." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/pm/tasks/" & subtask.getTaskId() );
+    }
+
+    // ---------- internals ----------
+
+    private void function toggleCompletion( event, rc, prc, required boolean completed ){
+        var subtask = subtaskService.getSubtask( rc.id ?: "" );
+        if ( isNull( subtask ) ) {
+            messagebox.warn( "That subtask does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        try {
+            subtaskService.updateSubtask( subtask.getId(), {
+                isCompleted : arguments.completed,
+                actorType   : prc.viewer.accountType ?: "agent",
+                actorId     : prc.viewer.accountId   ?: ""
+            } );
+            messagebox.info( arguments.completed ? "Subtask completed." : "Subtask reopened." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/pm/tasks/" & subtask.getTaskId() );
+    }
+
+    private struct function currentViewer(){
+        try {
+            var u = auth.getUser();
+            return {
+                accountType    : "agent",
+                accountId      : u.getId(),
+                organizationId : ""
+            };
+        } catch ( any e ) {
+            return { accountType : "agent", accountId : "", organizationId : "" };
+        }
+    }
+
+    private struct function collectFormData( required struct rc ){
+        return {
+            title           : trim( arguments.rc.title             ?: "" ),
+            description     : arguments.rc.description             ?: "",
+            assigneeType    : arguments.rc.assigneeType            ?: "",
+            assigneeId      : arguments.rc.assigneeId              ?: "",
+            dueDate         : len( arguments.rc.dueDate ?: "" ) ? arguments.rc.dueDate : "",
+            estimatedHours  : isNumeric( arguments.rc.estimatedHours ?: "" ) ? arguments.rc.estimatedHours : "",
+            sortOrder       : int( val( arguments.rc.sortOrder ?: 0 ) ),
+            isCompleted     : truthy( arguments.rc.isCompleted ?: false )
+        };
+    }
+
+    private struct function formDataDefaults( required struct rc ){
+        return {
+            title          : arguments.rc.title          ?: "",
+            description    : arguments.rc.description    ?: "",
+            assigneeType   : arguments.rc.assigneeType   ?: "",
+            assigneeId     : arguments.rc.assigneeId     ?: "",
+            dueDate        : arguments.rc.dueDate        ?: "",
+            estimatedHours : arguments.rc.estimatedHours ?: "",
+            sortOrder      : int( val( arguments.rc.sortOrder ?: 0 ) ),
+            isCompleted    : false
+        };
+    }
+
+    private struct function subtaskToFormData( required any subtask ){
+        return {
+            title          : arguments.subtask.getTitle()          ?: "",
+            description    : arguments.subtask.getDescription()    ?: "",
+            assigneeType   : arguments.subtask.getAssigneeType()   ?: "",
+            assigneeId     : arguments.subtask.getAssigneeId()     ?: "",
+            dueDate        : toString( arguments.subtask.getDueDate()        ?: "" ),
+            estimatedHours : arguments.subtask.getEstimatedHours() ?: "",
+            sortOrder      : int( val( arguments.subtask.getSortOrder() ?: 0 ) ),
+            isCompleted    : !!arguments.subtask.getIsCompleted()
+        };
+    }
+
+    private boolean function truthy( required any v ){
+        if ( isBoolean( arguments.v ) ) return arguments.v;
+        var s = lCase( toString( arguments.v ?: "" ) );
+        return s == "true" || s == "1" || s == "on" || s == "yes";
+    }
+
+}

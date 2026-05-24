@@ -1,0 +1,146 @@
+/**
+ * SubtaskServiceSpec: CRUD coverage for the Phase 2b Subtask
+ * surface.
+ *
+ * Each spec spins up an organization + project + parent task and
+ * tears down via the organizations CASCADE.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.svc        = variables.wb.getInstance( "SubtaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "SubtaskService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute(
+                        "DELETE FROM organizations WHERE id = :id",
+                        { id : orgId }
+                    );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createSubtask writes a row tied to the parent task", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var sub = variables.svc.createSubtask( {
+                    taskId         : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "First subtask"
+                } );
+                expect( sub.getId() ).notToBeEmpty();
+                expect( sub.getTaskId() ).toBe( ctx.task.getId() );
+                expect( !!sub.getIsCompleted() ).toBeFalse();
+                expect( toString( sub.getCompletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "createSubtask with isCompleted=true stamps completed_at immediately", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var sub = variables.svc.createSubtask( {
+                    taskId         : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "Pre-completed",
+                    isCompleted    : true
+                } );
+                expect( !!sub.getIsCompleted() ).toBeTrue();
+                expect( toString( sub.getCompletedAt() ?: "" ) ).notToBeEmpty();
+            } );
+
+            it( "createSubtask rejects a half-populated polymorphic assignee", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createSubtask( {
+                        taskId         : ctx.task.getId(),
+                        organizationId : ctx.orgId,
+                        title          : "bad",
+                        assigneeId     : "no-type"
+                    } );
+                } ).toThrow( type = "SubtaskService.InvalidAssignee" );
+            } );
+
+            it( "updateSubtask flips isCompleted and toggles completed_at on each cycle", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var sub = variables.svc.createSubtask( {
+                    taskId         : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "Toggle me"
+                } );
+
+                variables.svc.updateSubtask( sub.getId(), { isCompleted : true } );
+                var done = variables.svc.getSubtask( sub.getId() );
+                expect( !!done.getIsCompleted() ).toBeTrue();
+                expect( toString( done.getCompletedAt() ?: "" ) ).notToBeEmpty();
+
+                variables.svc.updateSubtask( sub.getId(), { isCompleted : false } );
+                var reopened = variables.svc.getSubtask( sub.getId() );
+                expect( !!reopened.getIsCompleted() ).toBeFalse();
+                expect( toString( reopened.getCompletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "removeSubtask + restoreSubtask round-trips deleted_at", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var sub = variables.svc.createSubtask( {
+                    taskId         : ctx.task.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "Soft delete me"
+                } );
+                variables.svc.removeSubtask( sub.getId() );
+                expect( variables.svc.getSubtask( sub.getId() ) ).toBeNull();
+
+                variables.svc.restoreSubtask( sub.getId() );
+                var restored = variables.svc.getSubtask( sub.getId() );
+                expect( restored ).notToBeNull();
+                expect( toString( restored.getDeletedAt() ?: "" ) ).toBe( "" );
+            } );
+
+            it( "listForTask returns subtasks ordered by sort_order then created_at", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var a = variables.svc.createSubtask( { taskId : ctx.task.getId(), organizationId : ctx.orgId, title : "A", sortOrder : 10 } );
+                var b = variables.svc.createSubtask( { taskId : ctx.task.getId(), organizationId : ctx.orgId, title : "B", sortOrder : 5  } );
+
+                var rows = variables.svc.listForTask( ctx.task.getId() );
+                var ids  = rows.map( ( s ) => s.getId() );
+                expect( arrayFindNoCase( ids, b.getId() ) lt arrayFindNoCase( ids, a.getId() ) ).toBeTrue();
+            } );
+
+        } );
+    }
+
+    // ---------- fixture helpers ----------
+
+    private struct function setupTask( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            {
+                id   : orgId,
+                name : "ssvc-" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                slug : "ssvc-" & lCase( replace( createUUID(), "-", "", "all" ) )
+            }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+
+        var project = variables.projectSvc.createProject( {
+            organizationId : orgId,
+            name           : "subtask-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var task = variables.taskSvc.createTask( {
+            projectId      : project.getId(),
+            organizationId : orgId,
+            title          : "parent task"
+        } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+}

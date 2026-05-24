@@ -139,6 +139,96 @@ class singleton=true {
         }
     }
 
+    // ---------------------------------------------------------------
+    // Tasks (BUILD-PLAN §3.3 Option C)
+    // ---------------------------------------------------------------
+
+    /**
+     * Build the Quick query for tasks the viewer is allowed to see
+     * within a specific project. Returns an unloaded QuickBuilder
+     * so the caller can chain further filters (status, label,
+     * sort) before .get().
+     *
+     * Agents see every task in the project. Contacts see:
+     *   1. tasks assigned to them, OR
+     *   2. tasks assigned to another contact in their org, OR
+     *   3. tasks with is_client_visible = true.
+     *
+     * Internal (is_internal-style) filtering on comments lives in
+     * CommentService (Phase 4); this method governs task rows only.
+     */
+    public any function tasksQueryForViewer(
+        required struct viewer,
+        required string projectId
+    ){
+        validateViewer( arguments.viewer );
+        var q = wirebox.getInstance( "Task@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId )
+            .whereNull( "deleted_at" );
+
+        if ( arguments.viewer.accountType == "agent" ) return q;
+
+        // Contact path. Org cut is enforced by the project's own
+        // visibility check at the caller; here we add the Option C
+        // task-level predicate.
+        var contactId      = arguments.viewer.accountId;
+        var organizationId = arguments.viewer.organizationId;
+        return q.where( function( inner ){
+            inner.where( function( orGroup ){
+                orGroup.where( "assignee_type", "contact" )
+                       .where( "assignee_id",   contactId );
+            } )
+            .orWhere( "is_client_visible", true )
+            .orWhereIn( "assignee_id", function( sub ){
+                sub.from( "contacts" )
+                   .select( "id" )
+                   .where( "organization_id", organizationId );
+            }, { combinator : "and", andLeft : "assignee_type", andLeftOp : "=", andLeftVal : "contact" } );
+        } );
+    }
+
+    /**
+     * Return true when the viewer is allowed to see the task.
+     * The caller is responsible for first checking that the task's
+     * project is visible (canViewProject).
+     */
+    public boolean function canViewTask( required struct viewer, required any task ){
+        validateViewer( arguments.viewer );
+        if ( isNull( arguments.task ) ) return false;
+        if ( arguments.viewer.accountType == "agent" ) return true;
+
+        if ( !!arguments.task.getIsClientVisible() ) return true;
+
+        var assigneeType = arguments.task.getAssigneeType() ?: "";
+        var assigneeId   = arguments.task.getAssigneeId()   ?: "";
+        if ( assigneeType != "contact" || !len( assigneeId ) ) return false;
+
+        // Same viewer.
+        if ( assigneeId == arguments.viewer.accountId ) return true;
+
+        // Another contact in the same org. Look up by joining
+        // through the contacts table because the task does not
+        // carry the assignee's org explicitly.
+        var hit = queryExecute(
+            "SELECT 1 FROM contacts
+             WHERE  id = :cid
+             AND    organization_id = :org
+             LIMIT  1",
+            { cid : assigneeId, org : arguments.viewer.organizationId }
+        );
+        return hit.recordCount > 0;
+    }
+
+    public void function assertCanViewTask( required struct viewer, required any task ){
+        if ( !canViewTask( arguments.viewer, arguments.task ) ) {
+            throw(
+                type    = "VisibilityService.TaskNotVisible",
+                message = "Viewer is not authorized to see this task."
+            );
+        }
+    }
+
     // ---------- internals ----------
 
     private void function validateViewer( required struct viewer ){

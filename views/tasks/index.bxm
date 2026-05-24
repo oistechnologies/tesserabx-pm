@@ -1,0 +1,137 @@
+<bx:output>
+<bx:set local.project = prc.project >
+
+<div class="container-fluid">
+	<nav aria-label="breadcrumb" class="mb-2">
+		<ol class="breadcrumb mb-0 small">
+			<li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+			<li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.project.getId() )#" class="link-secondary">#encodeForHTML( local.project.getName() )#</a></li>
+			<li class="breadcrumb-item active" aria-current="page">Tasks</li>
+		</ol>
+	</nav>
+
+	<div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+		<div>
+			<h1 class="mb-0 fs-3">Tasks</h1>
+			<p class="text-body-secondary mb-0 small">#encodeForHTML( local.project.getName() )#</p>
+		</div>
+		<a class="btn btn-primary" href="/agent/pm/projects/#encodeForURL( local.project.getId() )#/tasks/new">
+			<i class="bi bi-plus-lg"></i> New task
+		</a>
+	</div>
+
+	<!--- Filter --->
+	<form method="get" action="/agent/pm/projects/#encodeForURL( local.project.getId() )#/tasks" class="card mb-3">
+		<div class="card-body">
+			<div class="row g-3">
+				<div class="col-12 col-md-4">
+					<label class="form-label" for="q">Search</label>
+					<div class="input-group">
+						<span class="input-group-text"><i class="bi bi-search"></i></span>
+						<input type="search" class="form-control" id="q" name="q"
+							placeholder="Title..."
+							value="#encodeForHTMLAttribute( prc.filters.q ?: "" )#">
+					</div>
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="statusId">Status</label>
+					<select class="form-select" id="statusId" name="statusId">
+						<option value="">All statuses</option>
+						<bx:loop array="#prc.statuses#" item="s">
+							<option value="#encodeForHTMLAttribute( s.getId() )#"
+								<bx:if ( prc.filters.statusId ?: "" ) eq s.getId()> selected</bx:if>>
+								#encodeForHTML( s.getName() )#
+							</option>
+						</bx:loop>
+					</select>
+				</div>
+				<div class="col-6 col-md-3">
+					<label class="form-label" for="priority">Priority</label>
+					<select class="form-select" id="priority" name="priority">
+						<option value="">Any</option>
+						<bx:loop array="#[ "low", "medium", "high", "urgent" ]#" item="p">
+							<option value="#p#" <bx:if ( prc.filters.priority ?: "" ) eq p> selected</bx:if>>#p#</option>
+						</bx:loop>
+					</select>
+				</div>
+				<div class="col-12 col-md-2 d-flex align-items-end gap-2">
+					<button class="btn btn-primary flex-grow-1" type="submit">Filter</button>
+					<a class="btn btn-outline-secondary" href="/agent/pm/projects/#encodeForURL( local.project.getId() )#/tasks">Reset</a>
+				</div>
+			</div>
+		</div>
+	</form>
+
+	<!--- Kanban columns. Each status (plus the "(unassigned)" --->
+	<!--- bucket for tasks whose status row was removed) renders   --->
+	<!--- as a card column.                                         --->
+	<div class="row g-3">
+		<bx:loop array="#prc.statuses#" item="s">
+			<bx:set local.bucket = prc.tasksByStatus[ s.getId() ] >
+			<bx:set local.headerStyle = len( s.getColor() ?: "" ) ? 'style="border-bottom: 3px solid ' & encodeForHTMLAttribute( s.getColor() ) & ';"' : "" >
+			<div class="col-12 col-md-6 col-lg-3">
+				<div class="card h-100">
+					<div class="card-header d-flex align-items-center" #local.headerStyle#>
+						<strong>#encodeForHTML( s.getName() )#</strong>
+						<span class="badge text-bg-secondary ms-auto">#arrayLen( local.bucket.items )#</span>
+					</div>
+					<div class="card-body p-2">
+						<bx:if !arrayLen( local.bucket.items )>
+							<p class="text-body-secondary small text-center mb-0 py-3">No tasks.</p>
+						</bx:if>
+						<bx:loop array="#local.bucket.items#" item="t">
+							<a href="/agent/pm/tasks/#encodeForURL( t.getId() )#" class="card mb-2 text-decoration-none">
+								<div class="card-body p-2">
+									<div class="d-flex justify-content-between align-items-start gap-2">
+										<strong class="text-body small">#encodeForHTML( t.getTitle() )#</strong>
+										<span class="badge text-bg-#priorityBadge( t.getPriority() )#">#encodeForHTML( t.getPriority() )#</span>
+									</div>
+									<bx:if len( toString( t.getDueDate() ?: "" ) )>
+										<div class="text-body-secondary small mt-1"><i class="bi bi-calendar"></i> #toString( t.getDueDate() )#</div>
+									</bx:if>
+									<bx:if !!t.getIsClientVisible()>
+										<span class="badge text-bg-info mt-1"><i class="bi bi-eye"></i> client-visible</span>
+									</bx:if>
+								</div>
+							</a>
+						</bx:loop>
+					</div>
+				</div>
+			</div>
+		</bx:loop>
+
+		<!--- Tasks with a null/missing status. --->
+		<bx:if structKeyExists( prc.tasksByStatus, "" ) and arrayLen( prc.tasksByStatus[ "" ].items )>
+			<div class="col-12 col-md-6 col-lg-3">
+				<div class="card h-100 border-warning">
+					<div class="card-header d-flex align-items-center">
+						<strong>(Unassigned status)</strong>
+						<span class="badge text-bg-warning ms-auto">#arrayLen( prc.tasksByStatus[ "" ].items )#</span>
+					</div>
+					<div class="card-body p-2">
+						<bx:loop array="#prc.tasksByStatus[ "" ].items#" item="t">
+							<a href="/agent/pm/tasks/#encodeForURL( t.getId() )#" class="card mb-2 text-decoration-none">
+								<div class="card-body p-2">
+									<strong class="text-body small">#encodeForHTML( t.getTitle() )#</strong>
+								</div>
+							</a>
+						</bx:loop>
+					</div>
+				</div>
+			</div>
+		</bx:if>
+	</div>
+</div>
+</bx:output>
+
+<bx:script>
+private string function priorityBadge( required string p ){
+    switch ( arguments.p ) {
+        case "urgent": return "danger";
+        case "high":   return "warning";
+        case "medium": return "secondary";
+        case "low":    return "info";
+        default:       return "secondary";
+    }
+}
+</bx:script>

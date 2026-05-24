@@ -1,0 +1,311 @@
+/**
+ * Agent-surface Tasks handler.
+ *
+ * Routes (declared in config/Router.bx, auto-prefixed with
+ * /agent/pm):
+ *
+ *   GET  /projects/:projectId/tasks       -> index    (within project)
+ *   GET  /projects/:projectId/tasks/new   -> new      (form)
+ *   POST /projects/:projectId/tasks/new   -> create
+ *   GET  /tasks/:id                        -> show
+ *   POST /tasks/:id                        -> update
+ *   GET  /tasks/:id/edit                   -> edit
+ *   POST /tasks/:id/delete                 -> remove  (soft delete)
+ *   POST /tasks/:id/restore                -> restore
+ *
+ * The /agent/pm/projects/:projectId/tasks URL hosts the list and
+ * the new-task form because both need the parent project context;
+ * everything else routes by task id directly since UUIDs are
+ * unique.
+ */
+class {
+
+    property name="taskService"          inject="TaskService@tesserabx-pm";
+    property name="subtaskService"       inject="SubtaskService@tesserabx-pm";
+    property name="projectService"       inject="ProjectService@tesserabx-pm";
+    property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="contactsService"      inject="ContactsService@contacts";
+    property name="messagebox"           inject="messagebox@cbmessagebox";
+    property name="auth"                 inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+        prc.viewer = currentViewer();
+    }
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    function index( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        param rc.statusId     = "";
+        param rc.assigneeType = "";
+        param rc.assigneeId   = "";
+        param rc.priority     = "";
+        param rc.q            = "";
+
+        prc.pageTitle = project.getName() & " — Tasks";
+        prc.project   = project;
+        prc.statuses  = projectStatusService.listForProject( project.getId() );
+        prc.filters   = {
+            statusId     : rc.statusId,
+            assigneeType : rc.assigneeType,
+            assigneeId   : rc.assigneeId,
+            priority     : rc.priority,
+            q            : rc.q
+        };
+        prc.tasks = taskService.listForProject(
+            projectId    = project.getId(),
+            statusId     = rc.statusId,
+            assigneeType = rc.assigneeType,
+            assigneeId   = rc.assigneeId,
+            priority     = rc.priority,
+            search       = rc.q
+        );
+        prc.tasksByStatus = groupTasksByStatus( prc.tasks, prc.statuses );
+
+        event.setView( view = "tasks/index", module = "tesserabx-pm" );
+    }
+
+    function show( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        var project = projectService.getProject( task.getProjectId() );
+        if ( isNull( project ) ) {
+            messagebox.warn( "The parent project no longer exists." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var subtasks = subtaskService.listForTask( task.getId() );
+
+        prc.pageTitle = task.getTitle();
+        prc.task      = task;
+        prc.project   = project;
+        prc.statuses  = projectStatusService.listForProject( project.getId() );
+        prc.status    = !isNull( task.getStatusId() ) && len( task.getStatusId() ) ? projectStatusService.getStatus( task.getStatusId() ) : "";
+        prc.subtasks  = subtasks;
+
+        event.setView( view = "tasks/show", module = "tesserabx-pm" );
+    }
+
+    // ---------------------------------------------------------------
+    // Writes
+    // ---------------------------------------------------------------
+
+    function new( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        prc.pageTitle  = "New task in " & project.getName();
+        prc.project    = project;
+        prc.statuses   = projectStatusService.listForProject( project.getId() );
+        prc.formData   = formDataDefaults( rc );
+        prc.formErrors = prc.formErrors ?: [];
+        event.setView( view = "tasks/new", module = "tesserabx-pm" );
+    }
+
+    function create( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var data = collectFormData( rc );
+        data.projectId      = project.getId();
+        data.organizationId = project.getOrganizationId();
+        data.actorType      = prc.viewer.accountType ?: "agent";
+        data.actorId        = prc.viewer.accountId   ?: "";
+
+        try {
+            var task = taskService.createTask( data );
+            messagebox.info( "Task created." );
+            relocate( uri = "/agent/pm/tasks/" & task.getId() );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            prc.project    = project;
+            prc.statuses   = projectStatusService.listForProject( project.getId() );
+            prc.formData   = data;
+            prc.formErrors = [ { field : "", message : e.message } ];
+            event.setView( view = "tasks/new", module = "tesserabx-pm" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        var project = projectService.getProject( task.getProjectId() );
+
+        prc.pageTitle  = "Edit task";
+        prc.task       = task;
+        prc.project    = project;
+        prc.statuses   = projectStatusService.listForProject( task.getProjectId() );
+        prc.formData   = taskToFormData( task );
+        prc.formErrors = prc.formErrors ?: [];
+        event.setView( view = "tasks/edit", module = "tesserabx-pm" );
+    }
+
+    function update( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+
+        var data = collectFormData( rc );
+        data.actorType = prc.viewer.accountType ?: "agent";
+        data.actorId   = prc.viewer.accountId   ?: "";
+
+        try {
+            taskService.updateTask( task.getId(), data );
+            messagebox.info( "Task updated." );
+            relocate( uri = "/agent/pm/tasks/" & task.getId() );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            var project   = projectService.getProject( task.getProjectId() );
+            prc.task      = task;
+            prc.project   = project;
+            prc.statuses  = projectStatusService.listForProject( task.getProjectId() );
+            prc.formData  = data;
+            prc.formErrors = [ { field : "", message : e.message } ];
+            event.setView( view = "tasks/edit", module = "tesserabx-pm" );
+        }
+    }
+
+    function remove( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        try {
+            taskService.removeTask( task.getId() );
+            messagebox.info( "Task deleted." );
+            relocate( uri = "/agent/pm/projects/" & task.getProjectId() & "/tasks" );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+            relocate( uri = "/agent/pm/tasks/" & task.getId() );
+        }
+    }
+
+    function restore( event, rc, prc ){
+        try {
+            taskService.restoreTask( rc.id ?: "" );
+            messagebox.info( "Task restored." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/pm/tasks/" & ( rc.id ?: "" ) );
+    }
+
+    // ---------- internals ----------
+
+    private struct function currentViewer(){
+        try {
+            var u = auth.getUser();
+            return {
+                accountType    : "agent",
+                accountId      : u.getId(),
+                organizationId : ""
+            };
+        } catch ( any e ) {
+            return { accountType : "agent", accountId : "", organizationId : "" };
+        }
+    }
+
+    private struct function collectFormData( required struct rc ){
+        return {
+            title             : trim( arguments.rc.title             ?: "" ),
+            description       : arguments.rc.description             ?: "",
+            statusId          : arguments.rc.statusId                ?: "",
+            priority          : arguments.rc.priority                ?: "medium",
+            assigneeType      : arguments.rc.assigneeType            ?: "",
+            assigneeId        : arguments.rc.assigneeId              ?: "",
+            startDate         : len( arguments.rc.startDate ?: "" ) ? arguments.rc.startDate : "",
+            dueDate           : len( arguments.rc.dueDate   ?: "" ) ? arguments.rc.dueDate   : "",
+            estimatedHours    : isNumeric( arguments.rc.estimatedHours ?: "" ) ? arguments.rc.estimatedHours : "",
+            isClientVisible   : truthy( arguments.rc.isClientVisible ?: false ),
+            sortOrder         : int( val( arguments.rc.sortOrder ?: 0 ) )
+        };
+    }
+
+    private struct function formDataDefaults( required struct rc ){
+        return {
+            title           : arguments.rc.title           ?: "",
+            description     : arguments.rc.description     ?: "",
+            statusId        : arguments.rc.statusId        ?: "",
+            priority        : arguments.rc.priority        ?: "medium",
+            assigneeType    : arguments.rc.assigneeType    ?: "",
+            assigneeId      : arguments.rc.assigneeId      ?: "",
+            startDate       : arguments.rc.startDate       ?: "",
+            dueDate         : arguments.rc.dueDate         ?: "",
+            estimatedHours  : arguments.rc.estimatedHours  ?: "",
+            isClientVisible : truthy( arguments.rc.isClientVisible ?: false ),
+            sortOrder       : int( val( arguments.rc.sortOrder ?: 0 ) )
+        };
+    }
+
+    private struct function taskToFormData( required any task ){
+        return {
+            title           : arguments.task.getTitle()           ?: "",
+            description     : arguments.task.getDescription()     ?: "",
+            statusId        : arguments.task.getStatusId()        ?: "",
+            priority        : arguments.task.getPriority()        ?: "medium",
+            assigneeType    : arguments.task.getAssigneeType()    ?: "",
+            assigneeId      : arguments.task.getAssigneeId()      ?: "",
+            startDate       : toString( arguments.task.getStartDate()      ?: "" ),
+            dueDate         : toString( arguments.task.getDueDate()        ?: "" ),
+            estimatedHours  : arguments.task.getEstimatedHours()  ?: "",
+            isClientVisible : !!arguments.task.getIsClientVisible(),
+            sortOrder       : int( val( arguments.task.getSortOrder() ?: 0 ) )
+        };
+    }
+
+    private struct function groupTasksByStatus( required array tasks, required array statuses ){
+        var byStatus = {};
+        for ( var s in arguments.statuses ) {
+            byStatus[ s.getId() ] = { status : s, items : [] };
+        }
+        // Bucket for tasks without a status row (statusId is null
+        // or refers to a removed row). Keyed by empty string so
+        // the view can render an "(Unassigned)" column.
+        byStatus[ "" ] = { status : "", items : [] };
+
+        for ( var t in arguments.tasks ) {
+            var k = t.getStatusId() ?: "";
+            if ( !structKeyExists( byStatus, k ) ) k = "";
+            byStatus[ k ].items.append( t );
+        }
+        return byStatus;
+    }
+
+    private boolean function truthy( required any v ){
+        if ( isBoolean( arguments.v ) ) return arguments.v;
+        var s = lCase( toString( arguments.v ?: "" ) );
+        return s == "true" || s == "1" || s == "on" || s == "yes";
+    }
+
+}

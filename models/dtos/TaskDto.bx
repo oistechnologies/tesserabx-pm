@@ -1,0 +1,40 @@
+/**
+ * TaskDto: maps a Task entity to a snake_case struct.
+ *
+ * Mirrors ProjectDto@tesserabx-pm and TicketDto@tickets in shape:
+ * singleton service, null-coalesced output for serializer stability,
+ * timestamps stringified.
+ */
+class singleton=true {
+
+    public struct function fromTask( required any entity ){
+        var t = arguments.entity;
+        return {
+            id                  : t.getId(),
+            project_id          : t.getProjectId()           ?: "",
+            organization_id     : t.getOrganizationId()      ?: "",
+            status_id           : t.getStatusId()            ?: "",
+            title               : t.getTitle()               ?: "",
+            description         : t.getDescription()         ?: "",
+            priority            : t.getPriority()            ?: "medium",
+            assignee_type       : t.getAssigneeType()        ?: "",
+            assignee_id         : t.getAssigneeId()          ?: "",
+            start_date          : toString( t.getStartDate()    ?: "" ),
+            due_date            : toString( t.getDueDate()      ?: "" ),
+            estimated_hours     : t.getEstimatedHours()      ?: javaCast( "null", "" ),
+            is_client_visible   : !!t.getIsClientVisible(),
+            sort_order          : int( val( t.getSortOrder() ?: 0 ) ),
+            completed_at        : toString( t.getCompletedAt() ?: "" ),
+            created_by_type     : t.getCreatedByType()       ?: "",
+            created_by_id       : t.getCreatedById()         ?: "",
+            created_at          : toString( t.getCreatedAt() ?: "" ),
+            updated_at          : toString( t.getUpdatedAt() ?: "" ),
+            deleted_at          : toString( t.getDeletedAt() ?: "" )
+        };
+    }
+
+    public array function fromTaskArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromTask( e ) );
+    }
+
+}

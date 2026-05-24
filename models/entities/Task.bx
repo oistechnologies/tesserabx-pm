@@ -31,7 +31,7 @@ class
 
     property name="startDate"        column="start_date" sqltype="date";
     property name="dueDate"          column="due_date"   sqltype="date";
-    property name="estimatedHours"   column="estimated_hours";
+    property name="estimatedHours"   column="estimated_hours" sqltype="decimal";
 
     property name="isClientVisible"  column="is_client_visible";
     property name="sortOrder"        column="sort_order";

@@ -1,0 +1,32 @@
+/**
+ * ISubtaskService: documented public surface of
+ * SubtaskService@tesserabx-pm. Documentation contract; resolve the
+ * live implementation through WireBox.
+ */
+class {
+
+    public any function getSubtask( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "ISubtaskService is a contract; resolve SubtaskService@tesserabx-pm." );
+    }
+
+    public array function listForTask( required string taskId, boolean includeDeleted = false ){
+        throw( type = "ContractClass.NotImplemented", message = "ISubtaskService is a contract; resolve SubtaskService@tesserabx-pm." );
+    }
+
+    public any function createSubtask( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ISubtaskService is a contract; resolve SubtaskService@tesserabx-pm." );
+    }
+
+    public any function updateSubtask( required string id, required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ISubtaskService is a contract; resolve SubtaskService@tesserabx-pm." );
+    }
+
+    public any function removeSubtask( required string id, struct data = {} ){
+        throw( type = "ContractClass.NotImplemented", message = "ISubtaskService is a contract; resolve SubtaskService@tesserabx-pm." );
+    }
+
+    public any function restoreSubtask( required string id, struct data = {} ){
+        throw( type = "ContractClass.NotImplemented", message = "ISubtaskService is a contract; resolve SubtaskService@tesserabx-pm." );
+    }
+
+}

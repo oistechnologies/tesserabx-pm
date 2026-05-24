@@ -1,0 +1,149 @@
+<bx:output>
+<bx:set local.t = prc.task >
+<bx:set local.project = prc.project >
+
+<div class="container-fluid">
+	<nav aria-label="breadcrumb" class="mb-2">
+		<ol class="breadcrumb mb-0 small">
+			<li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+			<li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.project.getId() )#" class="link-secondary">#encodeForHTML( local.project.getName() )#</a></li>
+			<li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.project.getId() )#/tasks" class="link-secondary">Tasks</a></li>
+			<li class="breadcrumb-item active" aria-current="page">#encodeForHTML( local.t.getTitle() )#</li>
+		</ol>
+	</nav>
+
+	<div class="d-flex justify-content-between align-items-start mb-3 gap-3 flex-wrap">
+		<div>
+			<h1 class="mb-1 fs-3">#encodeForHTML( local.t.getTitle() )#</h1>
+			<div class="d-flex gap-2 align-items-center text-body-secondary small">
+				<bx:if !isSimpleValue( prc.status ?: "" )>
+					<span class="badge text-bg-primary"
+						<bx:if len( prc.status.getColor() ?: "" )> style="background-color: #encodeForHTMLAttribute( prc.status.getColor() )#;"</bx:if>>
+						#encodeForHTML( prc.status.getName() )#
+					</span>
+				<bx:else>
+					<span class="badge text-bg-secondary">(no status)</span>
+				</bx:if>
+				<span class="badge text-bg-#priorityBadge( local.t.getPriority() )#">#encodeForHTML( local.t.getPriority() )#</span>
+				<bx:if !!local.t.getIsClientVisible()>
+					<span class="badge text-bg-info"><i class="bi bi-eye"></i> client-visible</span>
+				</bx:if>
+				<bx:if len( toString( local.t.getCompletedAt() ?: "" ) )>
+					<span class="badge text-bg-success"><i class="bi bi-check-circle"></i> completed</span>
+				</bx:if>
+			</div>
+		</div>
+		<div class="d-flex gap-2">
+			<a class="btn btn-outline-secondary" href="/agent/pm/tasks/#encodeForURL( local.t.getId() )#/edit"><i class="bi bi-pencil"></i> Edit</a>
+			<form method="post" action="/agent/pm/tasks/#encodeForURL( local.t.getId() )#/delete" class="d-inline"
+				onsubmit="return confirm( 'Soft-delete this task? It can be restored.' );">
+				<button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash"></i> Delete</button>
+			</form>
+		</div>
+	</div>
+
+	<div class="row g-3">
+		<div class="col-12 col-lg-8">
+			<div class="card">
+				<div class="card-body">
+					<h2 class="h5 mb-2">Description</h2>
+					<bx:if len( local.t.getDescription() ?: "" )>
+						<p class="mb-0" style="white-space: pre-wrap;">#encodeForHTML( local.t.getDescription() )#</p>
+					<bx:else>
+						<p class="text-body-secondary mb-0 fst-italic">No description.</p>
+					</bx:if>
+				</div>
+			</div>
+
+			<div class="card mt-3">
+				<div class="card-body">
+					<div class="d-flex justify-content-between align-items-center mb-2">
+						<h2 class="h5 mb-0">Subtasks <span class="badge text-bg-secondary">#arrayLen( prc.subtasks ?: [] )#</span></h2>
+						<a class="btn btn-sm btn-outline-primary" href="/agent/pm/tasks/#encodeForURL( local.t.getId() )#/subtasks/new"><i class="bi bi-plus-lg"></i> New subtask</a>
+					</div>
+					<bx:if !arrayLen( prc.subtasks ?: [] )>
+						<p class="text-body-secondary mb-0 fst-italic">No subtasks yet.</p>
+					<bx:else>
+						<ul class="list-group list-group-flush">
+							<bx:loop array="#prc.subtasks#" item="st">
+								<li class="list-group-item d-flex justify-content-between align-items-center">
+									<div class="d-flex align-items-center gap-2 flex-grow-1">
+										<bx:if !!st.getIsCompleted()>
+											<form method="post" action="/agent/pm/subtasks/#encodeForURL( st.getId() )#/reopen" class="d-inline">
+												<button class="btn btn-link btn-sm p-0 text-success" type="submit" title="Mark incomplete"><i class="bi bi-check-circle-fill"></i></button>
+											</form>
+										<bx:else>
+											<form method="post" action="/agent/pm/subtasks/#encodeForURL( st.getId() )#/complete" class="d-inline">
+												<button class="btn btn-link btn-sm p-0 text-body-secondary" type="submit" title="Mark complete"><i class="bi bi-circle"></i></button>
+											</form>
+										</bx:if>
+										<span <bx:if !!st.getIsCompleted()>class="text-decoration-line-through text-body-secondary"</bx:if>>
+											#encodeForHTML( st.getTitle() )#
+										</span>
+										<bx:if len( toString( st.getDueDate() ?: "" ) )>
+											<small class="text-body-secondary">due #toString( st.getDueDate() )#</small>
+										</bx:if>
+									</div>
+									<div class="d-flex gap-1">
+										<a class="btn btn-sm btn-outline-secondary" href="/agent/pm/subtasks/#encodeForURL( st.getId() )#/edit"><i class="bi bi-pencil"></i></a>
+										<form method="post" action="/agent/pm/subtasks/#encodeForURL( st.getId() )#/delete" class="d-inline"
+											onsubmit="return confirm( 'Delete this subtask?' );">
+											<button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+										</form>
+									</div>
+								</li>
+							</bx:loop>
+						</ul>
+					</bx:if>
+				</div>
+			</div>
+		</div>
+
+		<div class="col-12 col-lg-4">
+			<div class="card">
+				<div class="card-body">
+					<h2 class="h6 mb-3">Details</h2>
+					<dl class="row mb-0 small">
+						<dt class="col-5">Assignee</dt>
+						<dd class="col-7">
+							<bx:if len( local.t.getAssigneeId() ?: "" )>
+								<span class="badge text-bg-secondary">#encodeForHTML( local.t.getAssigneeType() )#</span>
+								<code>#encodeForHTML( left( local.t.getAssigneeId(), 8 ) )#…</code>
+							<bx:else>
+								<span class="text-body-secondary fst-italic">unassigned</span>
+							</bx:if>
+						</dd>
+
+						<dt class="col-5">Due</dt>
+						<dd class="col-7">#toString( local.t.getDueDate() ?: "" )#</dd>
+
+						<dt class="col-5">Estimated</dt>
+						<dd class="col-7"><bx:if isNumeric( local.t.getEstimatedHours() ?: "" )>#local.t.getEstimatedHours()#h<bx:else>—</bx:if></dd>
+
+						<dt class="col-5">Completed</dt>
+						<dd class="col-7">#toString( local.t.getCompletedAt() ?: "" )#</dd>
+
+						<dt class="col-5">Created</dt>
+						<dd class="col-7">#toString( local.t.getCreatedAt() ?: "" )#</dd>
+
+						<dt class="col-5">Updated</dt>
+						<dd class="col-7">#toString( local.t.getUpdatedAt() ?: "" )#</dd>
+					</dl>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+</bx:output>
+
+<bx:script>
+private string function priorityBadge( required string p ){
+    switch ( arguments.p ) {
+        case "urgent": return "danger";
+        case "high":   return "warning";
+        case "medium": return "secondary";
+        case "low":    return "info";
+        default:       return "secondary";
+    }
+}
+</bx:script>

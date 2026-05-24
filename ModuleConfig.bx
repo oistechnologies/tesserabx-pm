@@ -223,10 +223,25 @@ class {
         binder.map( "ProjectService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.ProjectService" )
               .asSingleton();
+        binder.map( "ProjectStatusService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.ProjectStatusService" )
+              .asSingleton();
+        binder.map( "TaskService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.TaskService" )
+              .asSingleton();
+        binder.map( "SubtaskService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.SubtaskService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.ProjectDto" )
+              .asSingleton();
+        binder.map( "TaskDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.TaskDto" )
+              .asSingleton();
+        binder.map( "SubtaskDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.SubtaskDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

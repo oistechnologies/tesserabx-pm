@@ -159,6 +159,28 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( dto ).notToBeNull();
             } );
 
+            // ---- Phase 2b: Task / Subtask CRUD wiring.
+
+            it( "binds ProjectStatusService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds TaskService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TaskService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds SubtaskService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SubtaskService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds TaskDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TaskDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds SubtaskDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SubtaskDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
             it( "registers the pm.default-template-id per-tenant setting", function(){
                 var descs = variables.settingsReg.listDescriptors( "tesserabx-pm" );
                 var keys  = descs.map( ( s ) => s.key );

@@ -1,0 +1,130 @@
+/**
+ * ProjectStatusService: read + hydrate the per-project kanban
+ * column set.
+ *
+ * Phase 2b ships just enough surface for TaskService to attach
+ * tasks to a status and for Project create to seed the default
+ * 5-column workflow. The full per-project status CRUD UI (rename,
+ * recolor, reorder, add new) is deferred to Phase 2c.
+ *
+ * On project creation, `hydrateFromTemplate` reads the template's
+ * `structure_json.statuses` array and writes one pm_project_statuses
+ * row per entry. The shared "Standard Workflow" template (seeded
+ * by migration 2026_05_24_000300) ships these five:
+ *
+ *   Backlog | To Do | In Progress | In Review | Done
+ *
+ * with the canonical colors and the "Done" status flagged
+ * is_completed=true (so the Phase 8 close-on-complete listener
+ * recognizes a task as finished).
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    /**
+     * Return every status row for a project, ordered by sort_order.
+     * Bypasses the tenant scope because agent callers may need it
+     * for projects across orgs; contact-side callers go through
+     * VisibilityService first.
+     */
+    public array function listForProject( required string projectId ){
+        return wirebox.getInstance( "ProjectStatus@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "project_id", arguments.projectId )
+            .orderBy( "sort_order", "asc" )
+            .get();
+    }
+
+    /**
+     * Resolve a single status by id. Returns null when not found.
+     */
+    public any function getStatus( required string id ){
+        var s = wirebox.getInstance( "ProjectStatus@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( s ) ? javaCast( "null", "" ) : s;
+    }
+
+    /**
+     * Find the default status for a project. Used by TaskService to
+     * place a newly-created task in the right column when no explicit
+     * status is supplied. Falls back to the lowest sort_order row
+     * if no row has is_default=true.
+     */
+    public any function defaultStatusForProject( required string projectId ){
+        var statuses = listForProject( arguments.projectId );
+        if ( !statuses.len() ) return javaCast( "null", "" );
+        for ( var s in statuses ) {
+            if ( !!s.getIsDefault() ) return s;
+        }
+        return statuses[ 1 ];
+    }
+
+    /**
+     * Hydrate pm_project_statuses for a project from a template's
+     * structure_json. Idempotent: skips when the project already
+     * has any status rows.
+     *
+     * The template structure shape (per the seed migration):
+     *   {
+     *       "statuses" : [
+     *           { "name" : "...", "color" : "##......", "sort_order" : N,
+     *             "is_default" : bool, "is_completed" : bool }
+     *       ],
+     *       "labels" : [], "custom_fields" : [], "tasks" : []
+     *   }
+     *
+     * Missing or malformed template -> silent no-op (a warning is
+     * logged once at the caller).
+     */
+    public void function hydrateFromTemplate(
+        required string projectId,
+        required string organizationId,
+        required string templateId
+    ){
+        // Idempotency guard.
+        var existing = listForProject( arguments.projectId );
+        if ( existing.len() ) return;
+
+        var template = wirebox.getInstance( "ProjectTemplate@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.templateId )
+            .first();
+        if ( isNull( template ) ) return;
+
+        var structureJson = template.getStructureJson() ?: "";
+        if ( !len( trim( structureJson ) ) ) return;
+
+        var structure = "";
+        try {
+            structure = jsonDeserialize( structureJson );
+        } catch ( any e ) {
+            writeLog(
+                text : "ProjectStatusService.hydrateFromTemplate could not parse template [#arguments.templateId#] structure_json: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return;
+        }
+
+        var statuses = ( structure.statuses ?: [] );
+        if ( !isArray( statuses ) || !statuses.len() ) return;
+
+        for ( var entry in statuses ) {
+            if ( !isStruct( entry ) || !len( entry.name ?: "" ) ) continue;
+            var status = wirebox.getInstance( "ProjectStatus@tesserabx-pm" );
+            status.setId(             createUUID() );
+            status.setProjectId(      arguments.projectId );
+            status.setOrganizationId( arguments.organizationId );
+            status.setName(           entry.name );
+            status.setColor(          entry.color      ?: "" );
+            status.setSortOrder(      int( val( entry.sort_order ?: 0 ) ) );
+            status.setIsDefault(      !!( entry.is_default   ?: false ) );
+            status.setIsCompleted(    !!( entry.is_completed ?: false ) );
+            status.save();
+        }
+    }
+
+}

@@ -1,0 +1,212 @@
+/**
+ * SubtaskService: CRUD over pm_subtasks.
+ *
+ * Subtasks are the lightweight child of Task per BUILD-PLAN §3.1:
+ * binary completion, polymorphic assignee, optional due_date and
+ * estimated_hours. No status set, no custom fields, no embeddings.
+ *
+ * Marking a subtask complete stamps completed_at. The reverse
+ * (marking incomplete) clears completed_at. Soft delete via
+ * deleted_at per BUILD-PLAN §3.13.
+ *
+ * Events emitted:
+ *   onPmSubtaskCreated   (async)
+ *   onPmSubtaskCompleted (async, when is_completed flips true)
+ */
+class singleton=true {
+
+    property name="wirebox"              inject="wirebox";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+
+    variables.VALID_ASSIGNEE_TYPES = [ "agent", "contact" ];
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    public any function getSubtask( required string id ){
+        var s = wirebox.getInstance( "Subtask@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .whereNull( "deleted_at" )
+            .first();
+        return isNull( s ) ? javaCast( "null", "" ) : s;
+    }
+
+    public array function listForTask( required string taskId, boolean includeDeleted = false ){
+        var q = wirebox.getInstance( "Subtask@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "task_id", arguments.taskId );
+        if ( !arguments.includeDeleted ) q = q.whereNull( "deleted_at" );
+        return q.orderBy( "sort_order", "asc" )
+                .orderBy( "created_at", "asc" )
+                .get();
+    }
+
+    // ---------------------------------------------------------------
+    // Writes
+    // ---------------------------------------------------------------
+
+    public any function createSubtask( required struct data ){
+        if ( !len( arguments.data.taskId ?: "" ) )         throw( type = "SubtaskService.MissingField", message = "taskId is required to create a subtask." );
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "SubtaskService.MissingField", message = "organizationId is required to create a subtask." );
+        if ( !len( arguments.data.title ?: "" ) )          throw( type = "SubtaskService.MissingField", message = "title is required to create a subtask." );
+
+        validateAssignee( arguments.data.assigneeType ?: "", arguments.data.assigneeId ?: "" );
+
+        var subtask = wirebox.getInstance( "Subtask@tesserabx-pm" );
+        subtask.setId(             createUUID() );
+        subtask.setTaskId(         arguments.data.taskId );
+        subtask.setOrganizationId( arguments.data.organizationId );
+        subtask.setTitle(          arguments.data.title );
+        subtask.setDescription(    arguments.data.description     ?: "" );
+        subtask.setAssigneeType(   len( arguments.data.assigneeType ?: "" ) ? arguments.data.assigneeType : javaCast( "null", "" ) );
+        subtask.setAssigneeId(     len( arguments.data.assigneeId   ?: "" ) ? arguments.data.assigneeId   : javaCast( "null", "" ) );
+        subtask.setDueDate(        arguments.data.dueDate          ?: javaCast( "null", "" ) );
+        subtask.setEstimatedHours( isNumeric( arguments.data.estimatedHours ?: "" ) ? arguments.data.estimatedHours : javaCast( "null", "" ) );
+        subtask.setIsCompleted(    !!( arguments.data.isCompleted ?: false ) );
+        subtask.setCompletedAt(    !!( arguments.data.isCompleted ?: false ) ? now() : javaCast( "null", "" ) );
+        subtask.setSortOrder(      int( val( arguments.data.sortOrder ?: 0 ) ) );
+        subtask.setCreatedByType(  arguments.data.actorType ?: "system" );
+        subtask.setCreatedById(    arguments.data.actorId   ?: javaCast( "null", "" ) );
+        subtask.save();
+
+        announceLifecycleEvent(
+            eventName : "onPmSubtaskCreated",
+            subtask   : subtask,
+            actorType : arguments.data.actorType ?: "system",
+            actorId   : arguments.data.actorId   ?: "system",
+            metadata  : {}
+        );
+
+        return subtask;
+    }
+
+    public any function updateSubtask( required string id, required struct data ){
+        var subtask = getSubtask( arguments.id );
+        if ( isNull( subtask ) ) throw( type = "SubtaskService.UnknownSubtask", message = "No subtask with id [#arguments.id#]." );
+
+        var wasCompleted = !!subtask.getIsCompleted();
+
+        if ( structKeyExists( arguments.data, "title"           ) ) subtask.setTitle(           arguments.data.title );
+        if ( structKeyExists( arguments.data, "description"     ) ) subtask.setDescription(     arguments.data.description );
+        if ( structKeyExists( arguments.data, "assigneeType" ) || structKeyExists( arguments.data, "assigneeId" ) ) {
+            var at = arguments.data.assigneeType ?: "";
+            var ai = arguments.data.assigneeId   ?: "";
+            validateAssignee( at, ai );
+            subtask.setAssigneeType( len( at ) ? at : javaCast( "null", "" ) );
+            subtask.setAssigneeId(   len( ai ) ? ai : javaCast( "null", "" ) );
+        }
+        if ( structKeyExists( arguments.data, "dueDate"         ) ) subtask.setDueDate(         arguments.data.dueDate );
+        if ( structKeyExists( arguments.data, "estimatedHours"  ) ) subtask.setEstimatedHours(  isNumeric( arguments.data.estimatedHours ?: "" ) ? arguments.data.estimatedHours : javaCast( "null", "" ) );
+        if ( structKeyExists( arguments.data, "sortOrder"       ) ) subtask.setSortOrder(       int( val( arguments.data.sortOrder ) ) );
+        var completionTransition = false;
+        var nowCompleted = !!subtask.getIsCompleted();
+        if ( structKeyExists( arguments.data, "isCompleted" ) ) {
+            nowCompleted = !!arguments.data.isCompleted;
+            completionTransition = ( nowCompleted != !!subtask.getIsCompleted() );
+            subtask.setIsCompleted( nowCompleted );
+            subtask.setCompletedAt( nowCompleted ? now() : javaCast( "null", "" ) );
+        }
+
+        subtask.save();
+
+        // Quick's setter + save() does not reliably persist NULL
+        // into a timestamp column; force the clear via direct SQL
+        // when transitioning to incomplete.
+        if ( completionTransition && !nowCompleted ) {
+            queryExecute(
+                "UPDATE pm_subtasks SET completed_at = NULL WHERE id = :id",
+                { id : subtask.getId() }
+            );
+        }
+
+        if ( !wasCompleted && !!subtask.getIsCompleted() ) {
+            announceLifecycleEvent(
+                eventName : "onPmSubtaskCompleted",
+                subtask   : subtask,
+                actorType : arguments.data.actorType ?: "system",
+                actorId   : arguments.data.actorId   ?: "system",
+                metadata  : {}
+            );
+        }
+
+        return subtask;
+    }
+
+    public any function removeSubtask( required string id, struct data = {} ){
+        var subtask = getSubtask( arguments.id );
+        if ( isNull( subtask ) ) throw( type = "SubtaskService.UnknownSubtask", message = "No subtask with id [#arguments.id#]." );
+        subtask.setDeletedAt( now() );
+        subtask.save();
+        return subtask;
+    }
+
+    public any function restoreSubtask( required string id, struct data = {} ){
+        var subtask = wirebox.getInstance( "Subtask@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        if ( isNull( subtask ) ) throw( type = "SubtaskService.UnknownSubtask", message = "No subtask with id [#arguments.id#]." );
+
+        queryExecute(
+            "UPDATE pm_subtasks
+             SET    deleted_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+             WHERE  id = :id",
+            { id : arguments.id }
+        );
+        return getSubtask( arguments.id );
+    }
+
+    // ---------- internals ----------
+
+    private void function validateAssignee( required string typeArg, required string idArg ){
+        var hasType = len( arguments.typeArg ) > 0;
+        var hasId   = len( arguments.idArg )   > 0;
+        if ( hasType != hasId ) {
+            throw(
+                type    = "SubtaskService.InvalidAssignee",
+                message = "assignee_type and assignee_id must be both set or both empty."
+            );
+        }
+        if ( hasType && !arrayContains( variables.VALID_ASSIGNEE_TYPES, arguments.typeArg ) ) {
+            throw(
+                type    = "SubtaskService.InvalidAssignee",
+                message = "assignee_type must be one of #arrayToList( variables.VALID_ASSIGNEE_TYPES )# (got [#arguments.typeArg#])."
+            );
+        }
+    }
+
+    private void function announceLifecycleEvent(
+        required string eventName,
+        required any subtask,
+        required string actorType,
+        required string actorId,
+        struct metadata = {},
+        boolean async   = true
+    ){
+        try {
+            interceptorService.announce(
+                arguments.eventName,
+                eventPayloadBuilder.build(
+                    event          : arguments.eventName,
+                    organizationId : arguments.subtask.getOrganizationId() ?: "",
+                    actorType      : arguments.actorType,
+                    actorId        : arguments.actorId,
+                    entity         : { type : "Subtask", id : arguments.subtask.getId() },
+                    metadata       : arguments.metadata
+                ),
+                arguments.async
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "SubtaskService.announceLifecycleEvent failed for [#arguments.eventName#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}
