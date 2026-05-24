@@ -115,6 +115,57 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 } ).toThrow( type = "TaskService.InvalidAssignee" );
             } );
 
+            it( "createTask forbids a contact actor from assigning to a contact (BUILD-PLAN §3.4)", function(){
+                // pm.assign-client is agent-only; a contact actor
+                // attempting a contact assignment is rejected at
+                // the service layer so the rule holds regardless of
+                // the calling surface (HTML agent handler, REST API,
+                // future portal handler).
+                var ctx = setupProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createTask( {
+                        projectId      : ctx.project.getId(),
+                        organizationId : ctx.orgId,
+                        title          : "client tries to assign",
+                        assigneeType   : "contact",
+                        assigneeId     : createUUID(),
+                        actorType      : "contact",
+                        actorId        : createUUID()
+                    } );
+                } ).toThrow( type = "TaskService.Forbidden" );
+            } );
+
+            it( "createTask allows an agent actor to assign to a contact", function(){
+                var ctx = setupProject( fixtureOrgIds );
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "agent assigns contact",
+                    assigneeType   : "contact",
+                    assigneeId     : createUUID(),
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                expect( task.getAssigneeType() ).toBe( "contact" );
+            } );
+
+            it( "updateTask forbids a contact actor from reassigning to a contact", function(){
+                var ctx  = setupProject( fixtureOrgIds );
+                var task = variables.svc.createTask( {
+                    projectId      : ctx.project.getId(),
+                    organizationId : ctx.orgId,
+                    title          : "to update"
+                } );
+                expect( function(){
+                    variables.svc.updateTask( task.getId(), {
+                        assigneeType : "contact",
+                        assigneeId   : createUUID(),
+                        actorType    : "contact",
+                        actorId      : createUUID()
+                    } );
+                } ).toThrow( type = "TaskService.Forbidden" );
+            } );
+
             it( "createTask rejects a status that belongs to a different project", function(){
                 var ctxA = setupProject( fixtureOrgIds );
                 var ctxB = setupProject( fixtureOrgIds );

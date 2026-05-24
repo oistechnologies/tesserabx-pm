@@ -121,17 +121,40 @@ class {
                     }
                 ],
                 // Top-level URL claims for surfaces PM cannot reach
-                // from its own module Router. `/agent/pm` is owned
-                // by PM's entryPoint and is handled directly by
-                // config/Router.bx; only the cross-surface URLs are
-                // declared here. The host's
+                // from its own module Router. /agent/pm is owned by
+                // PM's entryPoint; the cross-surface URLs (portal,
+                // admin landing card) and every /api/v1/pm/* REST
+                // endpoint are declared here. The host's
                 // AddonRouteClaimsRegistrar interceptor walks every
                 // manifest's `routeClaims` and prepends each into
                 // ColdBox's main router on `afterAspectsLoad`, so
                 // claims match before the host's catch-all.
                 routeClaims : [
-                    { path : "/pm",             verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index" },
-                    { path : "/agent/admin/pm", verbs : "GET", module : "tesserabx-pm", handler : "Main", action : "index" }
+                    // Cross-surface landing URLs.
+                    { path : "/pm",             verbs : "GET",    module : "tesserabx-pm", handler : "Main", action : "index" },
+                    { path : "/agent/admin/pm", verbs : "GET",    module : "tesserabx-pm", handler : "Main", action : "index" },
+
+                    // REST API — Projects.
+                    { path : "/api/v1/pm/projects",              verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Projects", action : "index"   },
+                    { path : "/api/v1/pm/projects",              verbs : "POST",   module : "tesserabx-pm", handler : "api.v1.Projects", action : "create"  },
+                    { path : "/api/v1/pm/projects/:id",          verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Projects", action : "show"    },
+                    { path : "/api/v1/pm/projects/:id",          verbs : "PATCH",  module : "tesserabx-pm", handler : "api.v1.Projects", action : "update"  },
+                    { path : "/api/v1/pm/projects/:id",          verbs : "DELETE", module : "tesserabx-pm", handler : "api.v1.Projects", action : "remove"  },
+                    { path : "/api/v1/pm/projects/:id/archive",  verbs : "POST",   module : "tesserabx-pm", handler : "api.v1.Projects", action : "archive" },
+                    { path : "/api/v1/pm/projects/:id/restore",  verbs : "POST",   module : "tesserabx-pm", handler : "api.v1.Projects", action : "restore" },
+
+                    // REST API — Tasks.
+                    { path : "/api/v1/pm/projects/:projectId/tasks", verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Tasks", action : "index"  },
+                    { path : "/api/v1/pm/projects/:projectId/tasks", verbs : "POST",   module : "tesserabx-pm", handler : "api.v1.Tasks", action : "create" },
+                    { path : "/api/v1/pm/tasks/:id",                 verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Tasks", action : "show"   },
+                    { path : "/api/v1/pm/tasks/:id",                 verbs : "PATCH",  module : "tesserabx-pm", handler : "api.v1.Tasks", action : "update" },
+                    { path : "/api/v1/pm/tasks/:id",                 verbs : "DELETE", module : "tesserabx-pm", handler : "api.v1.Tasks", action : "remove" },
+
+                    // REST API — Subtasks.
+                    { path : "/api/v1/pm/tasks/:taskId/subtasks", verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "index"  },
+                    { path : "/api/v1/pm/tasks/:taskId/subtasks", verbs : "POST",   module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "create" },
+                    { path : "/api/v1/pm/subtasks/:id",           verbs : "PATCH",  module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "update" },
+                    { path : "/api/v1/pm/subtasks/:id",           verbs : "DELETE", module : "tesserabx-pm", handler : "api.v1.Subtasks", action : "remove" }
                 ],
                 navigation : [
                     {
@@ -180,8 +203,33 @@ class {
                     }
                 ],
 
-                // Phase 2 onward: API surface.
-                apiResources            : [],
+                // REST API catalog. Companion to the /api/v1/pm/*
+                // route claims above; cbswagger and the admin
+                // diagnostics page read this list to build the
+                // OpenAPI doc and the per-add-on route inventory.
+                apiResources : [
+                    // Projects.
+                    { id : "pm.projects.list",     method : "GET",    path : "/api/v1/pm/projects",                version : "v1", handler : "api.v1.Projects", action : "index",   summary : "List PM projects.",                  requiresAuth : true, requiredPermission : "pm.view"   },
+                    { id : "pm.projects.create",   method : "POST",   path : "/api/v1/pm/projects",                version : "v1", handler : "api.v1.Projects", action : "create",  summary : "Create a PM project.",               requiresAuth : true, requiredPermission : "pm.create" },
+                    { id : "pm.projects.show",     method : "GET",    path : "/api/v1/pm/projects/:id",            version : "v1", handler : "api.v1.Projects", action : "show",    summary : "Show a single PM project.",          requiresAuth : true, requiredPermission : "pm.view"   },
+                    { id : "pm.projects.update",   method : "PATCH",  path : "/api/v1/pm/projects/:id",            version : "v1", handler : "api.v1.Projects", action : "update",  summary : "Update an existing PM project.",     requiresAuth : true, requiredPermission : "pm.edit"   },
+                    { id : "pm.projects.delete",   method : "DELETE", path : "/api/v1/pm/projects/:id",            version : "v1", handler : "api.v1.Projects", action : "remove",  summary : "Soft-delete a PM project.",          requiresAuth : true, requiredPermission : "pm.delete" },
+                    { id : "pm.projects.archive",  method : "POST",   path : "/api/v1/pm/projects/:id/archive",    version : "v1", handler : "api.v1.Projects", action : "archive", summary : "Archive a PM project.",              requiresAuth : true, requiredPermission : "pm.edit"   },
+                    { id : "pm.projects.restore",  method : "POST",   path : "/api/v1/pm/projects/:id/restore",    version : "v1", handler : "api.v1.Projects", action : "restore", summary : "Restore an archived / soft-deleted PM project.", requiresAuth : true, requiredPermission : "pm.edit" },
+
+                    // Tasks.
+                    { id : "pm.tasks.list",        method : "GET",    path : "/api/v1/pm/projects/:projectId/tasks", version : "v1", handler : "api.v1.Tasks",  action : "index",  summary : "List PM tasks within a project.",   requiresAuth : true, requiredPermission : "pm.view"   },
+                    { id : "pm.tasks.create",      method : "POST",   path : "/api/v1/pm/projects/:projectId/tasks", version : "v1", handler : "api.v1.Tasks",  action : "create", summary : "Create a PM task within a project.", requiresAuth : true, requiredPermission : "pm.create" },
+                    { id : "pm.tasks.show",        method : "GET",    path : "/api/v1/pm/tasks/:id",               version : "v1", handler : "api.v1.Tasks",  action : "show",   summary : "Show a single PM task.",             requiresAuth : true, requiredPermission : "pm.view"   },
+                    { id : "pm.tasks.update",      method : "PATCH",  path : "/api/v1/pm/tasks/:id",               version : "v1", handler : "api.v1.Tasks",  action : "update", summary : "Update an existing PM task.",        requiresAuth : true, requiredPermission : "pm.edit"   },
+                    { id : "pm.tasks.delete",      method : "DELETE", path : "/api/v1/pm/tasks/:id",               version : "v1", handler : "api.v1.Tasks",  action : "remove", summary : "Soft-delete a PM task.",             requiresAuth : true, requiredPermission : "pm.delete" },
+
+                    // Subtasks.
+                    { id : "pm.subtasks.list",     method : "GET",    path : "/api/v1/pm/tasks/:taskId/subtasks",  version : "v1", handler : "api.v1.Subtasks", action : "index",  summary : "List PM subtasks within a task.",   requiresAuth : true, requiredPermission : "pm.view"   },
+                    { id : "pm.subtasks.create",   method : "POST",   path : "/api/v1/pm/tasks/:taskId/subtasks",  version : "v1", handler : "api.v1.Subtasks", action : "create", summary : "Create a PM subtask within a task.", requiresAuth : true, requiredPermission : "pm.create" },
+                    { id : "pm.subtasks.update",   method : "PATCH",  path : "/api/v1/pm/subtasks/:id",            version : "v1", handler : "api.v1.Subtasks", action : "update", summary : "Update an existing PM subtask.",     requiresAuth : true, requiredPermission : "pm.edit"   },
+                    { id : "pm.subtasks.delete",   method : "DELETE", path : "/api/v1/pm/subtasks/:id",            version : "v1", handler : "api.v1.Subtasks", action : "remove", summary : "Soft-delete a PM subtask.",          requiresAuth : true, requiredPermission : "pm.delete" }
+                ],
 
                 // Phase 4: audit event types, project event timeline,
                 // and the canonical event envelopes PM announces.

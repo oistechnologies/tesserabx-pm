@@ -106,6 +106,16 @@ class singleton=true {
         // or both are empty.
         validateAssignee( arguments.data.assigneeType ?: "", arguments.data.assigneeId ?: "" );
 
+        // BUILD-PLAN §3.4: only agents may assign a task to a
+        // contact. Contact actor attempting a contact assignment
+        // is rejected here at the service layer regardless of the
+        // calling surface (HTML agent handler, REST API, future
+        // portal-side handler in Phase 11).
+        enforceAssignClientPermission(
+            actorType    : arguments.data.actorType ?: "system",
+            assigneeType : arguments.data.assigneeType ?: ""
+        );
+
         // Resolve the status. If the caller did not pass one, use
         // the project's default; otherwise verify the supplied
         // status belongs to the project.
@@ -190,6 +200,10 @@ class singleton=true {
             var at = arguments.data.assigneeType ?: "";
             var ai = arguments.data.assigneeId   ?: "";
             validateAssignee( at, ai );
+            enforceAssignClientPermission(
+                actorType    : arguments.data.actorType ?: "system",
+                assigneeType : at
+            );
             task.setAssigneeType( len( at ) ? at : javaCast( "null", "" ) );
             task.setAssigneeId(   len( ai ) ? ai : javaCast( "null", "" ) );
         }
@@ -334,6 +348,30 @@ class singleton=true {
             throw(
                 type    = "TaskService.InvalidAssignee",
                 message = "assignee_type must be one of #arrayToList( variables.VALID_ASSIGNEE_TYPES )# (got [#arguments.typeArg#])."
+            );
+        }
+    }
+
+    /**
+     * Enforce BUILD-PLAN §3.4: only Agent users may assign a task
+     * to a Contact. The pm.assign-client permission is agent-only,
+     * so a contact actor attempting to set a contact assignee is
+     * rejected at the service layer.
+     *
+     * The actor's account type is passed in by the caller (handler
+     * pulls it from cbauth or JWT). Empty actorType is treated as
+     * "system" and allowed; service code emitting events on behalf
+     * of the system has no contact identity.
+     */
+    private void function enforceAssignClientPermission(
+        required string actorType,
+        required string assigneeType
+    ){
+        if ( arguments.actorType == "contact"
+          && arguments.assigneeType == "contact" ) {
+            throw(
+                type    = "TaskService.Forbidden",
+                message = "Contacts cannot assign tasks to contacts. The pm.assign-client permission is agent-only."
             );
         }
     }

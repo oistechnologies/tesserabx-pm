@@ -24,6 +24,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.adminPages   = variables.wb.getInstance( "AdminPagesRegistry@admin" );
         variables.settingsReg  = variables.wb.getInstance( "SettingsRegistry@core" );
         variables.routeClaims  = variables.wb.getInstance( "RouteClaimsRegistry@core" );
+        variables.apiResources = variables.wb.getInstance( "ApiResourceRegistry@api" );
     }
 
     function run(){
@@ -179,6 +180,54 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
             it( "binds SubtaskDto@tesserabx-pm in WireBox", function(){
                 expect( variables.wb.getInstance( "SubtaskDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            // ---- Phase 2c: REST API surface.
+
+            it( "claims every /api/v1/pm/* endpoint in RouteClaimsRegistry@core", function(){
+                // Projects (7 entries)
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/projects"             ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/projects/:id"         ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/projects/:id/archive" ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/projects/:id/restore" ) ).notToBeNull();
+                // Tasks (3 paths covering 5 verbs)
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/projects/:projectId/tasks" ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/tasks/:id"                 ) ).notToBeNull();
+                // Subtasks (2 paths covering 4 verbs)
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/tasks/:taskId/subtasks" ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/api/v1/pm/subtasks/:id"           ) ).notToBeNull();
+            } );
+
+            it( "registers every CRUD endpoint in ApiResourceRegistry@api", function(){
+                expect( variables.apiResources.findById( "pm.projects.list"    ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.projects.create"  ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.projects.show"    ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.projects.update"  ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.projects.delete"  ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.projects.archive" ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.projects.restore" ) ).notToBeNull();
+
+                expect( variables.apiResources.findById( "pm.tasks.list"    ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.tasks.create"  ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.tasks.show"    ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.tasks.update"  ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.tasks.delete"  ) ).notToBeNull();
+
+                expect( variables.apiResources.findById( "pm.subtasks.list"   ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.subtasks.create" ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.subtasks.update" ) ).notToBeNull();
+                expect( variables.apiResources.findById( "pm.subtasks.delete" ) ).notToBeNull();
+            } );
+
+            it( "the projects list endpoint is wired with the expected permission gate", function(){
+                var resource = variables.apiResources.findById( "pm.projects.list" );
+                expect( resource ).notToBeNull();
+                expect( resource.method ).toBe( "GET" );
+                expect( resource.path ).toBe( "/api/v1/pm/projects" );
+                expect( resource.handler ).toBe( "api.v1.Projects" );
+                expect( resource.action ).toBe( "index" );
+                expect( resource.requiresAuth ).toBeTrue();
+                expect( resource.requiredPermission ).toBe( "pm.view" );
             } );
 
             it( "registers the pm.default-template-id per-tenant setting", function(){

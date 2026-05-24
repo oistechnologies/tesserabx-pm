@@ -1,0 +1,160 @@
+/**
+ * api.v1.Subtasks — REST endpoints for PM subtask CRUD.
+ *
+ * Mounted via settings.tesserabx.routeClaims at:
+ *
+ *   GET    /api/v1/pm/tasks/:taskId/subtasks  -> index (within task)
+ *   POST   /api/v1/pm/tasks/:taskId/subtasks  -> create
+ *   PATCH  /api/v1/pm/subtasks/:id            -> update
+ *   DELETE /api/v1/pm/subtasks/:id            -> remove
+ *
+ * Same per-action JWT guard as api.v1.Projects.
+ */
+class {
+
+    property name="subtaskService" inject="SubtaskService@tesserabx-pm";
+    property name="subtaskDto"     inject="SubtaskDto@tesserabx-pm";
+    property name="taskService"    inject="TaskService@tesserabx-pm";
+    property name="jwtService"     inject="JwtService@cbsecurity";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.paramValue( "format", "json" );
+    }
+
+    // ---- Reads
+
+    function index( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        if ( !len( rc.taskId ?: "" ) ) return badRequest( event, "taskId is required." );
+        param rc.includeDeleted = false;
+
+        var rows = subtaskService.listForTask(
+            taskId         = rc.taskId,
+            includeDeleted = truthy( rc.includeDeleted )
+        );
+        return event.renderData(
+            type       = "json",
+            statusCode = 200,
+            data       = { subtasks : subtaskDto.fromSubtaskArray( rows ), total : rows.len() }
+        );
+    }
+
+    // ---- Writes
+
+    function create( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        if ( !len( rc.taskId ?: "" ) ) return badRequest( event, "taskId is required." );
+        if ( !len( rc.title ?: "" ) )  return badRequest( event, "title is required." );
+
+        // Resolve organizationId from the parent task so the API
+        // caller does not have to know about denormalization.
+        var task = taskService.getTask( rc.taskId );
+        if ( isNull( task ) ) return notFound( event, "Parent task not found." );
+
+        try {
+            var s = subtaskService.createSubtask( {
+                taskId         : rc.taskId,
+                organizationId : task.getOrganizationId(),
+                title          : rc.title,
+                description    : rc.description    ?: "",
+                assigneeType   : rc.assigneeType   ?: "",
+                assigneeId     : rc.assigneeId     ?: "",
+                dueDate        : len( rc.dueDate ?: "" ) ? rc.dueDate : javaCast( "null", "" ),
+                estimatedHours : isNumeric( rc.estimatedHours ?: "" ) ? rc.estimatedHours : javaCast( "null", "" ),
+                isCompleted    : truthy( rc.isCompleted ?: false ),
+                sortOrder      : int( val( rc.sortOrder ?: 0 ) ),
+                actorType      : "agent",
+                actorId        : currentAgentId( prc )
+            } );
+            return event.renderData( type = "json", statusCode = 201, data = subtaskDto.fromSubtask( s ) );
+        } catch ( any e ) {
+            return badRequest( event, e.message );
+        }
+    }
+
+    function update( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        if ( isNull( subtaskService.getSubtask( rc.id ?: "" ) ) ) return notFound( event, "Subtask not found." );
+
+        var patch = collectUpdatePatch( rc );
+        patch.actorType = "agent";
+        patch.actorId   = currentAgentId( prc );
+
+        try {
+            var s = subtaskService.updateSubtask( rc.id, patch );
+            return event.renderData( type = "json", statusCode = 200, data = subtaskDto.fromSubtask( s ) );
+        } catch ( any e ) {
+            return badRequest( event, e.message );
+        }
+    }
+
+    function remove( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        try {
+            subtaskService.removeSubtask( rc.id ?: "", {
+                actorType : "agent", actorId : currentAgentId( prc )
+            } );
+            return event.renderData( type = "json", statusCode = 204, data = "" );
+        } catch ( any e ) {
+            if ( e.type contains "UnknownSubtask" ) return notFound( event, e.message );
+            return badRequest( event, e.message );
+        }
+    }
+
+    // ---- internals
+
+    private boolean function ensureAgent( required any event, required struct prc ){
+        try {
+            var payload = jwtService.getPayload();
+        } catch ( any e ) {
+            arguments.event.renderData(
+                type = "json", statusCode = 401,
+                data = { error : ( e.type ?: "TokenError" ) & ": " & ( e.message ?: "" ) }
+            );
+            return false;
+        }
+        if ( !listFindNoCase( payload.scope ?: "", "agent", " " ) ) {
+            arguments.event.renderData(
+                type = "json", statusCode = 403,
+                data = { error : "Token does not carry the agent role." }
+            );
+            return false;
+        }
+        return true;
+    }
+
+    private string function currentAgentId( required struct prc ){
+        if ( !structKeyExists( arguments.prc, "oCurrentUser" ) ) return "";
+        var u = arguments.prc.oCurrentUser;
+        if ( isNull( u ) ) return "";
+        try { return u.getId(); } catch ( any e ) { return ""; }
+    }
+
+    private struct function collectUpdatePatch( required struct rc ){
+        var patch = {};
+        for ( var key in [ "title", "description", "assigneeType", "assigneeId",
+                           "dueDate", "estimatedHours", "isCompleted", "sortOrder" ] ) {
+            if ( structKeyExists( arguments.rc, key ) ) {
+                if ( key == "isCompleted" )      patch[ key ] = truthy( arguments.rc[ key ] );
+                else if ( key == "sortOrder" )   patch[ key ] = int( val( arguments.rc[ key ] ) );
+                else                             patch[ key ] = arguments.rc[ key ];
+            }
+        }
+        return patch;
+    }
+
+    private boolean function truthy( required any v ){
+        if ( isBoolean( arguments.v ) ) return arguments.v;
+        var s = lCase( toString( arguments.v ?: "" ) );
+        return s == "true" || s == "1" || s == "on" || s == "yes";
+    }
+
+    private any function badRequest( required any event, required string message ){
+        return arguments.event.renderData( type = "json", statusCode = 400, data = { error : arguments.message } );
+    }
+
+    private any function notFound( required any event, required string message ){
+        return arguments.event.renderData( type = "json", statusCode = 404, data = { error : arguments.message } );
+    }
+
+}

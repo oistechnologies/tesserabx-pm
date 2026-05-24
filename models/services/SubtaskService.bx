@@ -54,6 +54,10 @@ class singleton=true {
         if ( !len( arguments.data.title ?: "" ) )          throw( type = "SubtaskService.MissingField", message = "title is required to create a subtask." );
 
         validateAssignee( arguments.data.assigneeType ?: "", arguments.data.assigneeId ?: "" );
+        enforceAssignClientPermission(
+            actorType    : arguments.data.actorType ?: "system",
+            assigneeType : arguments.data.assigneeType ?: ""
+        );
 
         var subtask = wirebox.getInstance( "Subtask@tesserabx-pm" );
         subtask.setId(             createUUID() );
@@ -95,6 +99,10 @@ class singleton=true {
             var at = arguments.data.assigneeType ?: "";
             var ai = arguments.data.assigneeId   ?: "";
             validateAssignee( at, ai );
+            enforceAssignClientPermission(
+                actorType    : arguments.data.actorType ?: "system",
+                assigneeType : at
+            );
             subtask.setAssigneeType( len( at ) ? at : javaCast( "null", "" ) );
             subtask.setAssigneeId(   len( ai ) ? ai : javaCast( "null", "" ) );
         }
@@ -175,6 +183,19 @@ class singleton=true {
             throw(
                 type    = "SubtaskService.InvalidAssignee",
                 message = "assignee_type must be one of #arrayToList( variables.VALID_ASSIGNEE_TYPES )# (got [#arguments.typeArg#])."
+            );
+        }
+    }
+
+    private void function enforceAssignClientPermission(
+        required string actorType,
+        required string assigneeType
+    ){
+        if ( arguments.actorType == "contact"
+          && arguments.assigneeType == "contact" ) {
+            throw(
+                type    = "SubtaskService.Forbidden",
+                message = "Contacts cannot assign subtasks to contacts. The pm.assign-client permission is agent-only."
             );
         }
     }

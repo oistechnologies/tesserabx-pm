@@ -6,6 +6,18 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 2c: REST API and `pm.assign-client` Enforcement
+
+- Three new API handlers under `handlers/api/v1/`: `Projects.bx`, `Tasks.bx`, `Subtasks.bx`. Each follows the host's `ensureAgent` JWT-guard pattern (mirrors `modules_app/api/handlers/Tickets.bx`): per-action guard reads the bearer via `JwtService@cbsecurity`, returns 401 when missing/invalid, 403 when the token lacks the `agent` role. Every action returns JSON via `event.renderData( type="json", statusCode=..., data=... )` using the existing `ProjectDto`, `TaskDto`, `SubtaskDto` mappers for serialization. Errors raised by the service layer (UnknownProject, InvalidVisibilityScope, InvalidAssignee, etc.) become 400s with a `{ error : "..." }` body; 404 for missing entities; 204 on soft-delete.
+- 16 new `routeClaims` entries in the manifest cover the full CRUD surface. Each `(path, verb)` pair gets its own claim so the host's `AddonRouteClaimsRegistrar` interceptor wires them into ColdBox's main router on `afterAspectsLoad`.
+- 16 matching `apiResources` entries register each endpoint with `ApiResourceRegistry@api` so cbswagger and the admin diagnostics surface have a machine-readable catalog of what PM exposes under `/api/v1/pm/*`. Each entry declares `requiredPermission` (`pm.view`/`pm.create`/`pm.edit`/`pm.delete`) for the future per-endpoint authorization layer.
+- BUILD-PLAN §3.4 enforcement: both `TaskService` and `SubtaskService` reject a `contact` actor attempting a `contact` assignee, throwing `TaskService.Forbidden` / `SubtaskService.Forbidden`. The check sits in the service layer so the rule holds regardless of the calling surface (HTML agent handler, REST API, future portal handler).
+- New tests:
+  - `TaskServiceSpec`: +3 specs for `pm.assign-client` enforcement (contact actor forbidden, agent actor allowed, update guard).
+  - `InstallSpec`: +3 probes verifying every API endpoint path lands in `RouteClaimsRegistry@core` and every endpoint id lands in `ApiResourceRegistry@api`, plus a shape check on `pm.projects.list`.
+- Smoke-tested locally: every `/api/v1/pm/*` URL responds 401 with `{ "error" : "TokenNotFoundException: ..." }` when called without a bearer; route claims wired up cleanly with no false 404s.
+- Deferred to Phase 2d (or later): per-project ProjectStatus CRUD UI; `config/cbSecurity.bx` per-action gating in addition to the service-layer guard (the agent firewall already covers `/agent/pm/*` coarsely); handler integration tests; agent/contact assignee picker; an actual end-to-end JWT round trip in the test suite.
+
 ### Phase 2b: Task and Subtask CRUD on the Agent Surface
 
 - `TaskService@tesserabx-pm` ships full CRUD on `pm_tasks` (BUILD-PLAN §7.1): create / list / get / update / remove / restore. Polymorphic assignee validation rejects half-populated `(assignee_type, assignee_id)` pairs. Status transitions stamp `completed_at` when moving into a status row with `is_completed=true` and clear it (via direct SQL, working around Quick's null-binding behavior on timestamp columns) when moving away. Emits `onPmTaskCreated`, `onPmTaskAssigned`, `onPmTaskStatusChanged` (sync, so the Phase 8 close-on-complete listener can react in-band), and `onPmTaskCompleted`.
