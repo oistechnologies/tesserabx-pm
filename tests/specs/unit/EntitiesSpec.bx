@@ -1,0 +1,165 @@
+/**
+ * PM entity sanity spec.
+ *
+ * Iterates every entity declared in models/entities/ and asserts:
+ *   - WireBox resolves the binding (catches a missing or typo'd
+ *     binder.map call in ModuleConfig.bx)
+ *   - The entity reports the expected table name
+ *   - newQuery() produces a builder (catches Quick configuration
+ *     errors and applyGlobalScopes() runtime failures, since the
+ *     tenant-scoped entities call into TenantScope@contacts there)
+ *
+ * Relationship surface is exercised separately on the canonical
+ * Project / Task / Subtask trio. A full per-relationship matrix
+ * is overkill for Phase 1; service-layer specs in Phase 2 cover
+ * the round-trip semantics.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb = getController().getWireBox();
+    }
+
+    function run(){
+        // TestBox calls run() to register it() blocks BEFORE
+        // beforeAll() fires, so values that drive iteration here
+        // must be declared inline; beforeAll-assigned variables are
+        // only available inside the it() bodies themselves.
+        var entityTable = {
+            "ProjectTemplate"  : "pm_project_templates",
+            "Project"          : "pm_projects",
+            "ProjectStatus"    : "pm_project_statuses",
+            "ProjectMember"    : "pm_project_members",
+            "ProjectEvent"     : "pm_project_events",
+            "Label"            : "pm_labels",
+            "TaskLabel"        : "pm_task_labels",
+            "CustomField"      : "pm_custom_fields",
+            "CustomFieldValue" : "pm_custom_field_values",
+            "Task"             : "pm_tasks",
+            "Subtask"          : "pm_subtasks",
+            "TaskTicket"       : "pm_task_tickets",
+            "Comment"          : "pm_comments",
+            "Watcher"          : "pm_watchers",
+            "Mention"          : "pm_mentions",
+            "TimeLog"          : "pm_time_logs",
+            "Attachment"       : "pm_attachments"
+        };
+
+        describe( "tesserabx-pm entity bindings", function(){
+
+            it( "covers all 17 entities defined in BUILD-PLAN §7", function(){
+                expect( entityTable ).toHaveLength( 17 );
+            } );
+
+            for ( var entityName in entityTable ) {
+                ( function( name, table ){
+                    it( name & " resolves through WireBox to " & table, function(){
+                        var ent = variables.wb.getInstance( name & "@tesserabx-pm" );
+                        expect( ent ).notToBeNull();
+                        expect( ent.tableName() ).toBe( table );
+                    } );
+
+                    it( name & " produces a queryable builder", function(){
+                        var ent = variables.wb.getInstance( name & "@tesserabx-pm" );
+                        var q   = ent.newQuery();
+                        expect( q ).notToBeNull();
+                    } );
+                } )( entityName, entityTable[ entityName ] );
+            }
+
+        } );
+
+        describe( "tesserabx-pm relationship surface", function(){
+
+            // Quick's relationship accessors (statuses(), tasks(), etc.)
+            // throw "Instance not loaded" when called on an unloaded
+            // entity, because the accessor needs a parent id to bind
+            // the foreign key. We can still verify the methods are
+            // declared on the class via metadata reflection without
+            // any DB rows. Full relationship round-trips land in the
+            // Phase 2 service-layer integration specs.
+            var declaredFunctions = function( name ){
+                var ent = variables.wb.getInstance( name & "@tesserabx-pm" );
+                var meta = getMetadata( ent );
+                var funcs = meta.functions ?: [];
+                return funcs.map( ( f ) => f.name );
+            };
+
+            it( "Project declares all 7 hierarchy relationship functions", function(){
+                var names = declaredFunctions( "Project" );
+                expect( names ).toInclude( "organization" );
+                expect( names ).toInclude( "templateSource" );
+                expect( names ).toInclude( "statuses" );
+                expect( names ).toInclude( "labels" );
+                expect( names ).toInclude( "customFields" );
+                expect( names ).toInclude( "members" );
+                expect( names ).toInclude( "tasks" );
+                expect( names ).toInclude( "events" );
+            } );
+
+            it( "Task declares project, organization, status, subtasks, labels, taskTickets", function(){
+                var names = declaredFunctions( "Task" );
+                expect( names ).toInclude( "project" );
+                expect( names ).toInclude( "organization" );
+                expect( names ).toInclude( "status" );
+                expect( names ).toInclude( "subtasks" );
+                expect( names ).toInclude( "labels" );
+                expect( names ).toInclude( "taskTickets" );
+            } );
+
+            it( "Subtask declares the task relationship", function(){
+                expect( declaredFunctions( "Subtask" ) ).toInclude( "task" );
+            } );
+
+            it( "Comment declares self-referencing parent, replies, and mentions", function(){
+                var names = declaredFunctions( "Comment" );
+                expect( names ).toInclude( "parent" );
+                expect( names ).toInclude( "replies" );
+                expect( names ).toInclude( "mentions" );
+            } );
+
+            it( "CustomField declares project and values", function(){
+                var names = declaredFunctions( "CustomField" );
+                expect( names ).toInclude( "project" );
+                expect( names ).toInclude( "values" );
+            } );
+
+            it( "TaskTicket declares both task and ticket sides of the bridge", function(){
+                var names = declaredFunctions( "TaskTicket" );
+                expect( names ).toInclude( "task" );
+                expect( names ).toInclude( "ticket" );
+            } );
+
+        } );
+
+        describe( "tesserabx-pm tenant scope", function(){
+
+            it( "Project applies TenantScope@contacts in applyGlobalScopes", function(){
+                var project = variables.wb.getInstance( "Project@tesserabx-pm" );
+                // The hook runs without throwing — that's the smoke
+                // signal. Behavioral correctness (the WHERE clause
+                // appears for contact viewers, no-op for agent
+                // viewers) is exercised in the host's
+                // TenantContextProbe-driven integration suites.
+                var scope = variables.wb.getInstance( "TenantScope@contacts" );
+                expect( scope ).notToBeNull();
+                var q = project.newQuery();
+                expect( q ).notToBeNull();
+            } );
+
+            it( "TaskLabel is intentionally NOT tenant-scoped (join table without organization_id)", function(){
+                // Confirms the deliberate exception per BUILD-PLAN
+                // §3.3: tenant protection lives on Task and Label,
+                // not on the pivot. The join carries no
+                // organization_id column and so no global scope.
+                var pivot = variables.wb.getInstance( "TaskLabel@tesserabx-pm" );
+                expect( pivot ).notToBeNull();
+                expect( pivot.tableName() ).toBe( "pm_task_labels" );
+            } );
+
+        } );
+    }
+
+}

@@ -16,8 +16,14 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     function beforeAll(){
         super.beforeAll();
         super.setup();
-        variables.wb       = getController().getWireBox();
-        variables.addonSvc = variables.wb.getInstance( "AddonRegistryService@core" );
+        variables.wb           = getController().getWireBox();
+        variables.addonSvc     = variables.wb.getInstance( "AddonRegistryService@core" );
+        variables.permissions  = variables.wb.getInstance( "PermissionRegistry@agent" );
+        variables.roles        = variables.wb.getInstance( "RoleRegistry@agent" );
+        variables.nav          = variables.wb.getInstance( "NavigationRegistry@core" );
+        variables.adminPages   = variables.wb.getInstance( "AdminPagesRegistry@admin" );
+        variables.settingsReg  = variables.wb.getInstance( "SettingsRegistry@core" );
+        variables.routeClaims  = variables.wb.getInstance( "RouteClaimsRegistry@core" );
     }
 
     function run(){
@@ -44,7 +50,107 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( !!row.requiresAi ).toBeFalse();
             } );
 
-            // Phase 1+ probes are appended below as registries are
+            // ---- Phase 1: permissions, roles, navigation,
+            //               admin landing card, per-tenant settings.
+
+            it( "registers all 6 PM permissions in PermissionRegistry@agent", function(){
+                var ids = variables.permissions.listAll().map( ( p ) => p.id );
+                expect( ids ).toInclude( "pm.view" );
+                expect( ids ).toInclude( "pm.create" );
+                expect( ids ).toInclude( "pm.edit" );
+                expect( ids ).toInclude( "pm.delete" );
+                expect( ids ).toInclude( "pm.assign-client" );
+                expect( ids ).toInclude( "pm.admin" );
+            } );
+
+            it( "registers all 6 PM roles in RoleRegistry@agent", function(){
+                expect( variables.roles.findById( "pm-admin"               ) ).notToBeNull();
+                expect( variables.roles.findById( "pm-manager"             ) ).notToBeNull();
+                expect( variables.roles.findById( "pm-contributor"         ) ).notToBeNull();
+                expect( variables.roles.findById( "pm-viewer"              ) ).notToBeNull();
+                expect( variables.roles.findById( "pm-client-viewer"       ) ).notToBeNull();
+                expect( variables.roles.findById( "pm-client-contributor"  ) ).notToBeNull();
+            } );
+
+            it( "pm-admin role binds every PM permission", function(){
+                var perms = variables.roles.permissionsFor( "pm-admin" );
+                expect( perms ).toInclude( "pm.view" );
+                expect( perms ).toInclude( "pm.create" );
+                expect( perms ).toInclude( "pm.edit" );
+                expect( perms ).toInclude( "pm.delete" );
+                expect( perms ).toInclude( "pm.assign-client" );
+                expect( perms ).toInclude( "pm.admin" );
+            } );
+
+            it( "client-side roles target the contact surface", function(){
+                expect( variables.roles.findById( "pm-client-viewer"      ).surface ).toBe( "contact" );
+                expect( variables.roles.findById( "pm-client-contributor" ).surface ).toBe( "contact" );
+            } );
+
+            it( "registers the agent main and portal main nav entries", function(){
+                expect( variables.nav.findById( "pm.agent.main"  ) ).notToBeNull();
+                expect( variables.nav.findById( "pm.portal.main" ) ).notToBeNull();
+            } );
+
+            it( "agent nav points at the BUILD-PLAN /agent/pm route", function(){
+                var entry = variables.nav.findById( "pm.agent.main" );
+                expect( entry ).notToBeNull();
+                expect( entry.route   ).toBe( "/agent/pm" );
+                expect( entry.surface ).toBe( "agent" );
+                expect( entry.requiredPermission ).toBe( "pm.view" );
+            } );
+
+            it( "portal nav points at the BUILD-PLAN /pm route", function(){
+                var entry = variables.nav.findById( "pm.portal.main" );
+                expect( entry ).notToBeNull();
+                expect( entry.route   ).toBe( "/pm" );
+                expect( entry.surface ).toBe( "portal" );
+            } );
+
+            it( "admin landing card points at the BUILD-PLAN /agent/admin/pm route", function(){
+                var hits = variables.adminPages.listAll().filter( ( c ) => c.id == "pm.admin.landing" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].route ).toBe( "/agent/admin/pm" );
+            } );
+
+            it( "portal nav targets the portal surface", function(){
+                var entry = variables.nav.findById( "pm.portal.main" );
+                expect( entry ).notToBeNull();
+                expect( entry.surface ).toBe( "portal" );
+                expect( entry.requiredPermission ).toBe( "pm.view" );
+            } );
+
+            it( "registers the PM admin landing card with pm.admin gating", function(){
+                var hits = variables.adminPages.listAll().filter( ( c ) => c.id == "pm.admin.landing" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].requiredPermission ).toBe( "pm.admin" );
+            } );
+
+            it( "claims the three BUILD-PLAN top-level URLs in RouteClaimsRegistry@core", function(){
+                expect( variables.routeClaims.findByPath( "/agent/pm"       ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/pm"             ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/agent/admin/pm" ) ).notToBeNull();
+                // All three should route to the same handler/action at
+                // Phase 1; Phase 2 splits admin and Phase 11 splits portal.
+                for ( var path in [ "/agent/pm", "/pm", "/agent/admin/pm" ] ) {
+                    var claim = variables.routeClaims.findByPath( path );
+                    expect( claim.module  ).toBe( "tesserabx-pm" );
+                    expect( claim.handler ).toBe( "Main" );
+                    expect( claim.action  ).toBe( "index" );
+                }
+            } );
+
+            it( "registers the pm.default-template-id per-tenant setting", function(){
+                var descs = variables.settingsReg.listDescriptors( "tesserabx-pm" );
+                var keys  = descs.map( ( s ) => s.key );
+                expect( keys ).toInclude( "pm.default-template-id" );
+                var desc = descs.filter( ( s ) => s.key == "pm.default-template-id" )[ 1 ];
+                expect( desc.type      ).toBe( "string" );
+                expect( desc.perTenant ).toBeTrue();
+                expect( desc.secret    ).toBeFalse();
+            } );
+
+            // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.
 

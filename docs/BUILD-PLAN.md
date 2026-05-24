@@ -678,7 +678,7 @@ Each phase has a goal, a deliverables list, an explicit list of manifest deltas,
 * GitHub repo at <https://github.com/oistechnologies/tesserabx-pm> initialized with `.gitignore`, `LICENSE` (Apache 2.0), `README.md`, `CHANGELOG.md`.
 * `box.json` with dependencies on coldbox, quick, qb, cbwire, cbsecurity, cbfs, cfmigrations (matched to the host's pinned versions where reasonable).
 * `ModuleConfig.bx` with: `entryPoint = "tesserabx-pm"`, `modelNamespace = "tesserabx-pm"`, `cfmapping = "tesserabx.modules.tesserabx-pm"`, `dependencies = [ "core", "contacts", "audit", "notifications", "ai", "api", "help" ]`, and a `settings.tesserabx` block with `addonId`, `displayName`, `version`, `minCoreVersion : "0.0.1"`, `requiresAi : false`. Empty arrays for every registry contribution.
-* `config/Router.bx` with a placeholder route `/agent/pm` rendering a "PM installed" page.
+* `config/Router.bx` with a placeholder route at the module entry point. The user-facing URLs (`/agent/pm`, `/pm`, `/agent/admin/pm`) are bound to PM's `Main.index` through the host's `routeClaims` manifest contract (declared in `settings.tesserabx.routeClaims`); the host's `RouteClaimsRegistry@core` + `AddonRouteClaimsRegistrar` interceptor wires them into ColdBox's main router on `afterAspectsLoad`. PM's module Router only handles routes under its own entry point.
 * Full folder structure per §5 (empty directories OK).
 * `tests/specs/InstallSpec.bx` modeled on `sample-addons/example-sync/tests/specs/InstallSpec.bx`. It currently asserts only that `AddonRegistryService@core` (or the host's equivalent lookup) reports `tesserabx-pm` as a discovered, compatible add-on. Registry-walking probes are added as registries are exercised in later phases.
 * GitHub Actions workflow that:
