@@ -45,27 +45,36 @@ class {
             relocate( uri = "/agent/pm/projects" );
             return;
         }
-
-        param rc.statusId     = "";
-        param rc.assigneeType = "";
-        param rc.assigneeId   = "";
-        param rc.priority     = "";
-        param rc.q            = "";
-
-        prc.pageTitle = project.getName() & " — Tasks";
+        prc.pageTitle = project.getName() & " — Board";
         prc.project   = project;
-        prc.board     = boardService.buildBoard(
-            projectId = project.getId(),
-            filters   = {
-                statusId     : rc.statusId,
-                assigneeType : rc.assigneeType,
-                assigneeId   : rc.assigneeId,
-                priority     : rc.priority,
-                search       : rc.q
-            }
-        );
-
+        prc.viewMode  = "board";
         event.setView( view = "tasks/index", module = "tesserabx-pm" );
+    }
+
+    function list( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = project.getName() & " — List";
+        prc.project   = project;
+        prc.viewMode  = "list";
+        event.setView( view = "tasks/list", module = "tesserabx-pm" );
+    }
+
+    function calendar( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = project.getName() & " — Calendar";
+        prc.project   = project;
+        prc.viewMode  = "calendar";
+        event.setView( view = "tasks/calendar", module = "tesserabx-pm" );
     }
 
     function show( event, rc, prc ){

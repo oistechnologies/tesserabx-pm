@@ -6,6 +6,17 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 10a: TaskList + Calendar + View Switcher
+
+- New `TaskList@tesserabx-pm` CBWire renders the project's tasks as a sortable table view alongside the kanban. Mirrors the kanban filter set (search, priority, assignee, labels) so the same task subset shows up regardless of view. Columns: title (link to task detail), status (inline dropdown), priority (inline dropdown), assignee, due date (inline date input), labels (pill row), created. Inline edits route through `TaskService.updateTask` so service-layer events still fire (the status-changed listener, the watcher fan-out, etc.). Sort by column header click; URL-persisted via `queryString` (q, priority, assigneeType, assigneeId, labelIds, sort, dir).
+- Deferred from the inline-edit scope: title / description / assignee / estimated hours — heavier edits still route through the task detail page. Reads use `BoardService.buildBoard`'s pipeline so we get the same labels-by-task batch query that powers the kanban chip row; the wire then flattens the column groups into a single sorted list.
+- New `CalendarView@tesserabx-pm` CBWire renders a monthly grid (Mon-Sun ISO week order, always 6 rows for a rectangular layout). Tasks placed by due date; task chips link to the task detail. Prev / Today / Next buttons in the header navigate months. State (`year`, `month`) URL-persisted via `queryString` so a shared link lands on the same view. One query per render pulls every task with a due date in the visible 42-day window; tasks bucketed by ISO date string for O(1) per-cell lookup.
+- View switcher partial at `views/_partials/task_view_switcher.bxm` renders a 3-button group (Board / List / Calendar) with the current view highlighted. Embedded above the wire in all three task views (`index.bxm`, `list.bxm`, `calendar.bxm`) plus a consistent project-name H1.
+- New handler actions `Tasks.list` and `Tasks.calendar` (thin: project lookup + setView). New routes `projects/:projectId/tasks/list` and `projects/:projectId/tasks/calendar` declared in `config/Router.bx` ahead of the existing `projects/:projectId/tasks` so they match before the default kanban route.
+- `Tasks.index` cleaned up: dropped the dead `prc.board` build (the kanban CBWire fetches its own data; the handler's pre-build was unused since Phase 3b).
+- No new tests required for the wires themselves (filter and sort logic delegate to `BoardService` which is already covered); InstallSpec is unchanged.
+- Deferred to Phase 10b: cross-project `MyTasks` view + `SavedFilter` entity (the migration, service, and per-user filter persistence across all three views).
+
 ### Phase 9b: Scheduled Due-Soon and Overdue Notifications
 
 - `PmTaskDueScanService@tesserabx-pm` ships two pure-SQL scanners. `scanDueSoon( hoursAhead = 24 )` walks `pm_tasks` for un-completed un-deleted assigned tasks whose due date falls within the window and announces `onPmTaskDueSoon` for each. `scanOverdue()` does the same for past-due un-completed tasks (assigned or not — the dispatcher gracefully skips when assignee metadata is missing). Both fire sync canonical envelopes through `EventPayloadBuilder@core`; `PmNotificationDispatcher` translates each into a `NotificationsService.dispatchForEvent` call targeting the assignee.

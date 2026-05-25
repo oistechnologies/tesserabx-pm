@@ -1,0 +1,165 @@
+/**
+ * CalendarView: monthly grid that places tasks by due date. Click
+ * a task chip to navigate to the task detail page; use the prev /
+ * next buttons to navigate months.
+ *
+ * Grid is 7 columns (Mon-Sun, ISO week order) and 5-6 rows depending
+ * on where the month starts. Days from the previous / next month
+ * fill in the corners; their cells render muted but still allow
+ * task chips to appear if a task's due date lands there.
+ *
+ * Mounted from views/tasks/calendar.bxm with:
+ *
+ *   #wire(
+ *       name   = "CalendarView@tesserabx-pm",
+ *       params = { projectId : prc.project.getId() }
+ *   )#
+ *
+ * State (URL-persisted via queryString):
+ *   year   : integer (defaults to current year)
+ *   month  : integer 1-12 (defaults to current month)
+ */
+class extends="cbwire.models.Component" {
+
+    property name="wirebox"        inject="wirebox";
+    property name="projectService" inject="ProjectService@tesserabx-pm";
+
+    data = {
+        "projectId" : "",
+        "year"      : 0,
+        "month"     : 0
+    };
+
+    queryString = [ "year", "month" ];
+
+    function onMount( required struct params = {} ){
+        data.projectId = arguments.params.projectId ?: "";
+        // Default to current month / year when the wire mounts with
+        // no querystring overrides.
+        if ( !data.year  || data.year  < 1900 ) data.year  = year(  now() );
+        if ( !data.month || data.month < 1    ) data.month = month( now() );
+        if ( data.month > 12 || data.month < 1 ) data.month = month( now() );
+    }
+
+    function project(){
+        if ( !len( data.projectId ) ) return "";
+        return projectService.getProject( data.projectId );
+    }
+
+    /**
+     * Build the calendar grid for the current month + the tasks
+     * that fall inside it. Returns:
+     *
+     *   {
+     *     weeks       : [ [ { date, inMonth, tasks: [ {id,title,priority} ] }, ... 7 ], ... 5-6 ],
+     *     monthLabel  : "September 2026",
+     *     firstOfMonth: <date>,
+     *     prevMonth   : { year, month },
+     *     nextMonth   : { year, month }
+     *   }
+     */
+    function grid(){
+        if ( !len( data.projectId ) ) return { weeks : [], monthLabel : "", prevMonth : {}, nextMonth : {} };
+
+        // Anchor of the month + its boundaries.
+        var firstOfMonth = createDate( data.year, data.month, 1 );
+        var lastOfMonth  = createDate( data.year, data.month, daysInMonth( firstOfMonth ) );
+
+        // First cell = the Monday on/before the 1st (ISO weeks).
+        // dayOfWeek returns 1=Sun .. 7=Sat; convert to Mon-first.
+        var dow1 = dayOfWeek( firstOfMonth );  // 1..7 Sun..Sat
+        var monOffset = ( dow1 == 1 ) ? 6 : ( dow1 - 2 );
+        var gridStart = dateAdd( "d", -monOffset, firstOfMonth );
+
+        // Render 6 weeks (42 cells) so the grid is rectangular even
+        // for short months and we never have a half-row at the end.
+        var rangeEnd = dateAdd( "d", 41, gridStart );
+
+        // Pull every task in the project with a due date in
+        // [gridStart, rangeEnd]. One query, no per-day fan-out.
+        // due_date is a DATE column; ANSI CAST(... AS date) wraps
+        // the bind params so PostgreSQL accepts the comparison.
+        // PG's `::date` shorthand collides with BoxLang's named-
+        // parameter parser (it would read `::date` as a param
+        // `:date`), so the verbose form is the path that works.
+        var rows = queryExecute(
+            "SELECT id, title, priority, due_date
+             FROM   pm_tasks
+             WHERE  project_id = :pid
+               AND  deleted_at IS NULL
+               AND  due_date BETWEEN CAST( :s AS date ) AND CAST( :e AS date )
+             ORDER BY due_date ASC, sort_order ASC",
+            {
+                pid : data.projectId,
+                s   : dateFormat( gridStart, "yyyy-mm-dd" ),
+                e   : dateFormat( rangeEnd,  "yyyy-mm-dd" )
+            }
+        );
+
+        // Bucket tasks by ISO date string for O(1) lookup per cell.
+        var tasksByDate = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var key = dateFormat( rows.due_date[ i ], "yyyy-mm-dd" );
+            if ( !structKeyExists( tasksByDate, key ) ) tasksByDate[ key ] = [];
+            tasksByDate[ key ].append( {
+                id       : rows.id[ i ],
+                title    : rows.title[ i ],
+                priority : rows.priority[ i ] ?: "medium"
+            } );
+        }
+
+        var weeks = [];
+        var cursor = gridStart;
+        var todayKey = dateFormat( now(), "yyyy-mm-dd" );
+        for ( var w = 1; w <= 6; w++ ) {
+            var week = [];
+            for ( var d = 1; d <= 7; d++ ) {
+                var key = dateFormat( cursor, "yyyy-mm-dd" );
+                week.append( {
+                    date       : key,
+                    dayNum     : day( cursor ),
+                    inMonth    : ( month( cursor ) == data.month && year( cursor ) == data.year ),
+                    isToday    : ( key == todayKey ),
+                    tasks      : tasksByDate[ key ] ?: []
+                } );
+                cursor = dateAdd( "d", 1, cursor );
+            }
+            weeks.append( week );
+        }
+
+        return {
+            weeks       : weeks,
+            monthLabel  : dateFormat( firstOfMonth, "mmmm yyyy" ),
+            prevMonth   : computeShift( -1 ),
+            nextMonth   : computeShift(  1 )
+        };
+    }
+
+    function goPrev(){
+        var s = computeShift( -1 );
+        data.year  = s.year;
+        data.month = s.month;
+    }
+
+    function goNext(){
+        var s = computeShift( 1 );
+        data.year  = s.year;
+        data.month = s.month;
+    }
+
+    function goToday(){
+        data.year  = year(  now() );
+        data.month = month( now() );
+    }
+
+    // ---------- internals ----------
+
+    private struct function computeShift( required numeric delta ){
+        var m = data.month + arguments.delta;
+        var y = data.year;
+        while ( m < 1  ) { m += 12; y -= 1; }
+        while ( m > 12 ) { m -= 12; y += 1; }
+        return { year : y, month : m };
+    }
+
+}

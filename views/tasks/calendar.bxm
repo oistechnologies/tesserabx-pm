@@ -1,0 +1,23 @@
+<bx:output>
+<bx:set local.p = prc.project >
+
+<div class="container-fluid">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+            <li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.p.getId() )#" class="link-secondary">#encodeForHTML( local.p.getName() )#</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Calendar</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="fs-3 mb-0">#encodeForHTML( local.p.getName() )#</h1>
+        #view( view = "_partials/task_view_switcher", module = "tesserabx-pm" )#
+    </div>
+
+    #wire(
+        name   = "CalendarView@tesserabx-pm",
+        params = { projectId : local.p.getId() }
+    )#
+</div>
+</bx:output>

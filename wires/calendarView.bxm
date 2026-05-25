@@ -1,0 +1,71 @@
+<bx:output>
+<bx:script>
+    local.g     = grid();
+    local.proj  = project();
+    local.dayHeaders = [ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ];
+
+    private string function priorityClass( required string p ){
+        switch ( arguments.p ) {
+            case "urgent": return "text-bg-danger";
+            case "high":   return "text-bg-warning";
+            case "medium": return "text-bg-secondary";
+            case "low":    return "text-bg-info";
+            default:       return "text-bg-secondary";
+        }
+    }
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-sm btn-outline-secondary" wire:click="goPrev">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" wire:click="goToday">Today</button>
+                <button class="btn btn-sm btn-outline-secondary" wire:click="goNext">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+                <h2 class="h5 mb-0 ms-2">#encodeForHTML( local.g.monthLabel )#</h2>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-bordered mb-0 pm-calendar" style="table-layout: fixed;">
+                <thead>
+                    <tr class="text-center small text-body-secondary">
+                        <bx:loop array="#local.dayHeaders#" item="dh">
+                            <th style="width: 14.28%;">#encodeForHTML( dh )#</th>
+                        </bx:loop>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:loop array="#local.g.weeks#" item="week">
+                        <tr style="height: 8rem;">
+                            <bx:loop array="#week#" item="cell">
+                                <td class="align-top p-1
+                                        <bx:if !cell.inMonth>bg-light-subtle text-body-secondary</bx:if>
+                                        <bx:if cell.isToday>border-primary border-2</bx:if>"
+                                    style="vertical-align: top;">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <span class="small <bx:if cell.isToday>fw-bold text-primary</bx:if>">#cell.dayNum#</span>
+                                    </div>
+                                    <div class="d-flex flex-column gap-1 mt-1">
+                                        <bx:loop array="#cell.tasks#" item="t">
+                                            <a href="/agent/pm/tasks/#encodeForURL( t.id )#"
+                                               class="badge #priorityClass( t.priority )# text-truncate text-decoration-none"
+                                               style="max-width: 100%; text-align: left;"
+                                               title="#encodeForHTMLAttribute( t.title )#">
+                                                #encodeForHTML( t.title )#
+                                            </a>
+                                        </bx:loop>
+                                    </div>
+                                </td>
+                            </bx:loop>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</bx:output>

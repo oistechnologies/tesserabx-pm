@@ -43,6 +43,10 @@ class {
             "POST" : "create"
         } );
         route( "projects/:projectId/tasks/quick-add" ).withVerbs( "POST" ).to( "Tasks.quickAdd" );
+        // Phase 10a alternate views (List, Calendar). Default
+        // /tasks remains the kanban board.
+        route( "projects/:projectId/tasks/list"     ).to( "Tasks.list"     );
+        route( "projects/:projectId/tasks/calendar" ).to( "Tasks.calendar" );
         route( "projects/:projectId/tasks" ).to( "Tasks.index" );
         route( "projects/:projectId/labels"        ).to( "Labels.index" );
         route( "projects/:projectId/custom-fields" ).to( "CustomFields.index" );

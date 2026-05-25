@@ -10,6 +10,11 @@
 		</ol>
 	</nav>
 
+	<div class="d-flex justify-content-between align-items-center mb-3">
+		<h1 class="fs-3 mb-0">#encodeForHTML( local.project.getName() )#</h1>
+		#view( view = "_partials/task_view_switcher", module = "tesserabx-pm" )#
+	</div>
+
 	#wire( name = "KanbanBoard@tesserabx-pm", params = { projectId : local.project.getId() } )#
 </div>
 </bx:output>

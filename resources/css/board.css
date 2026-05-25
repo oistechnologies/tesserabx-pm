@@ -6,6 +6,9 @@
 .pm-board {
 	display: flex;
 	gap: 1rem;
+	/* overflow-x stays as a fallback for narrow viewports or
+	   projects with many statuses; columns flex evenly until the
+	   per-column min-width floor pushes the row past the container. */
 	overflow-x: auto;
 	padding-bottom: 0.5rem;
 	min-height: 60vh;
@@ -13,8 +16,12 @@
 
 .pm-column {
 	background: var(--bs-tertiary-bg);
-	width: 320px;
-	flex-shrink: 0;
+	/* Equal-width columns inside the available row. `flex: 1 1 0`
+	   makes the columns share leftover space proportionally
+	   regardless of card contents; min-width stops them collapsing
+	   below readable size. */
+	flex: 1 1 0;
+	min-width: 240px;
 }
 
 .pm-column-body {

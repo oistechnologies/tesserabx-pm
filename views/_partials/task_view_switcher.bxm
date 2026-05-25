@@ -1,0 +1,29 @@
+<bx:output>
+<bx:script>
+    // Caller passes in prc.project (or args.project) + prc.viewMode
+    // (one of "board" | "list" | "calendar").
+    local.p    = args.project  ?: ( prc.project  ?: "" );
+    local.mode = args.viewMode ?: ( prc.viewMode ?: "board" );
+    local.hasProject = !isSimpleValue( local.p );
+    if ( local.hasProject ) {
+        local.pid         = local.p.getId();
+        local.boardUrl    = "/agent/pm/projects/" & encodeForURL( local.pid ) & "/tasks";
+        local.listUrl     = local.boardUrl & "/list";
+        local.calendarUrl = local.boardUrl & "/calendar";
+    }
+</bx:script>
+
+<bx:if local.hasProject>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Switch task view">
+        <a class="btn <bx:if local.mode eq 'board'>btn-primary<bx:else>btn-outline-secondary</bx:if>" href="#encodeForHTMLAttribute( local.boardUrl )#">
+            <i class="bi bi-kanban"></i> Board
+        </a>
+        <a class="btn <bx:if local.mode eq 'list'>btn-primary<bx:else>btn-outline-secondary</bx:if>" href="#encodeForHTMLAttribute( local.listUrl )#">
+            <i class="bi bi-list-ul"></i> List
+        </a>
+        <a class="btn <bx:if local.mode eq 'calendar'>btn-primary<bx:else>btn-outline-secondary</bx:if>" href="#encodeForHTMLAttribute( local.calendarUrl )#">
+            <i class="bi bi-calendar3"></i> Calendar
+        </a>
+    </div>
+</bx:if>
+</bx:output>
