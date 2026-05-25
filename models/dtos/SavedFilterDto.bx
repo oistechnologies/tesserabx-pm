@@ -1,0 +1,36 @@
+/**
+ * SavedFilterDto: snake-case shape for pm_saved_filters rows on the
+ * wire. `filters` is parsed back into a struct so consumers do not
+ * need to JSON-decode.
+ */
+class singleton=true {
+
+    public struct function fromFilter( required any f ){
+        var filters = {};
+        var raw = arguments.f.getFiltersJson() ?: "";
+        if ( len( raw ) ) {
+            try { filters = jsonDeserialize( raw ); }
+            catch ( any e ) { filters = {}; }
+        }
+        if ( !isStruct( filters ) ) filters = {};
+        return {
+            id         : arguments.f.getId(),
+            user_type  : arguments.f.getUserType(),
+            user_id    : arguments.f.getUserId(),
+            view       : arguments.f.getView(),
+            project_id : arguments.f.getProjectId() ?: "",
+            name       : arguments.f.getName(),
+            filters    : filters,
+            is_default : !!arguments.f.getIsDefault(),
+            created_at : isDate( arguments.f.getCreatedAt() ) ? dateTimeFormat( arguments.f.getCreatedAt(), "iso" ) : "",
+            updated_at : isDate( arguments.f.getUpdatedAt() ) ? dateTimeFormat( arguments.f.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromFilterArray( required array filters ){
+        var out = [];
+        for ( var f in arguments.filters ) out.append( fromFilter( f ) );
+        return out;
+    }
+
+}

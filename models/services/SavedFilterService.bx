@@ -1,0 +1,201 @@
+/**
+ * SavedFilterService: per-user named filter set CRUD.
+ *
+ * Filters live polymorphically against the (user_type, user_id)
+ * pair so both account families participate. A row's `view`
+ * column is one of "board" | "list" | "calendar" | "my-tasks";
+ * `project_id` is nullable so cross-project views (my-tasks) can
+ * persist filters without a project context.
+ *
+ * `filters_json` is a TEXT column carrying the wire's data
+ * struct (whatever the calling wire chose to save). The service
+ * does not interpret it; the consumer wire owns the shape.
+ *
+ * One filter per (user, view, project) tuple can be marked
+ * `is_default = true`; `setDefault` enforces the invariant by
+ * clearing the previous default in the same scope on every flip.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_VIEWS       = [ "board", "list", "calendar", "my-tasks" ];
+    variables.VALID_USER_TYPES  = [ "agent", "contact" ];
+
+    // ---------------- Reads ----------------
+
+    public any function getFilter( required string id ){
+        var f = wirebox.getInstance( "SavedFilter@tesserabx-pm" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( f ) ? javaCast( "null", "" ) : f;
+    }
+
+    /**
+     * List every filter a user has saved for one (view, projectId)
+     * scope. Pass an empty projectId for cross-project views
+     * (my-tasks).
+     */
+    public array function listForView(
+        required string userType,
+        required string userId,
+        required string view,
+        string projectId = ""
+    ){
+        var q = wirebox.getInstance( "SavedFilter@tesserabx-pm" )
+            .where( "user_type", arguments.userType )
+            .where( "user_id",   arguments.userId )
+            .where( "view",      arguments.view );
+        if ( len( arguments.projectId ) ) {
+            q.where( "project_id", arguments.projectId );
+        } else {
+            q.whereNull( "project_id" );
+        }
+        return q.orderBy( "is_default", "desc" ).orderBy( "name", "asc" ).get();
+    }
+
+    /**
+     * Find the (user, view, project) default filter, or null when
+     * none is set. The wire calls this on mount so a previously-
+     * saved default seeds the filter state.
+     */
+    public any function findDefault(
+        required string userType,
+        required string userId,
+        required string view,
+        string projectId = ""
+    ){
+        var q = wirebox.getInstance( "SavedFilter@tesserabx-pm" )
+            .where( "user_type",  arguments.userType )
+            .where( "user_id",    arguments.userId )
+            .where( "view",       arguments.view )
+            .where( "is_default", true );
+        if ( len( arguments.projectId ) ) {
+            q.where( "project_id", arguments.projectId );
+        } else {
+            q.whereNull( "project_id" );
+        }
+        var f = q.first();
+        return isNull( f ) ? javaCast( "null", "" ) : f;
+    }
+
+    // ---------------- Mutations ----------------
+
+    public any function createFilter( required struct data ){
+        if ( !len( arguments.data.userType ?: "" ) ) throw( type = "SavedFilterService.MissingField", message = "userType is required." );
+        if ( !len( arguments.data.userId   ?: "" ) ) throw( type = "SavedFilterService.MissingField", message = "userId is required." );
+        if ( !len( arguments.data.view     ?: "" ) ) throw( type = "SavedFilterService.MissingField", message = "view is required." );
+        if ( !len( arguments.data.name     ?: "" ) ) throw( type = "SavedFilterService.MissingField", message = "name is required." );
+
+        if ( !arrayContains( variables.VALID_VIEWS,      arguments.data.view     ) ) throw( type = "SavedFilterService.InvalidView", message = "view must be one of #arrayToList( variables.VALID_VIEWS )#." );
+        if ( !arrayContains( variables.VALID_USER_TYPES, arguments.data.userType ) ) throw( type = "SavedFilterService.InvalidUser", message = "userType must be one of #arrayToList( variables.VALID_USER_TYPES )#." );
+
+        var filters = arguments.data.filters ?: {};
+        if ( !isStruct( filters ) ) filters = {};
+
+        var f = wirebox.getInstance( "SavedFilter@tesserabx-pm" );
+        f.setId(          createUUID() );
+        f.setUserType(    arguments.data.userType );
+        f.setUserId(      arguments.data.userId );
+        f.setView(        arguments.data.view );
+        f.setProjectId(   len( arguments.data.projectId ?: "" ) ? arguments.data.projectId : javaCast( "null", "" ) );
+        f.setName(        trim( arguments.data.name ) );
+        f.setFiltersJson( jsonSerialize( filters ) );
+        f.setIsDefault(   false );
+        f.save();
+
+        if ( !!( arguments.data.isDefault ?: false ) ) {
+            setDefault( f.getId() );
+        }
+        return f;
+    }
+
+    public any function updateFilter( required string id, required struct data ){
+        var f = getFilter( arguments.id );
+        if ( isNull( f ) ) throw( type = "SavedFilterService.UnknownFilter", message = "No saved filter with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "name" ) ) {
+            var n = trim( arguments.data.name );
+            if ( !len( n ) ) throw( type = "SavedFilterService.MissingField", message = "name cannot be blank." );
+            f.setName( n );
+        }
+        if ( structKeyExists( arguments.data, "filters" ) && isStruct( arguments.data.filters ) ) {
+            f.setFiltersJson( jsonSerialize( arguments.data.filters ) );
+        }
+        f.save();
+        if ( structKeyExists( arguments.data, "isDefault" ) ) {
+            if ( !!arguments.data.isDefault ) setDefault( f.getId() );
+            else                              clearDefault( f.getId() );
+        }
+        return f;
+    }
+
+    public any function removeFilter( required string id ){
+        var f = getFilter( arguments.id );
+        if ( isNull( f ) ) throw( type = "SavedFilterService.UnknownFilter", message = "No saved filter with id [#arguments.id#]." );
+        queryExecute( "DELETE FROM pm_saved_filters WHERE id = :id", { id : arguments.id } );
+        return f;
+    }
+
+    /**
+     * Promote a filter to the default for its (user, view,
+     * project) scope. Demotes any sibling currently holding the
+     * default flag so the one-default invariant holds.
+     */
+    public void function setDefault( required string id ){
+        var f = getFilter( arguments.id );
+        if ( isNull( f ) ) throw( type = "SavedFilterService.UnknownFilter", message = "No saved filter with id [#arguments.id#]." );
+
+        var hasProject = len( f.getProjectId() ?: "" ) > 0;
+        if ( hasProject ) {
+            queryExecute(
+                "UPDATE pm_saved_filters
+                 SET    is_default = FALSE,
+                        updated_at = CURRENT_TIMESTAMP
+                 WHERE  user_type  = :ut
+                   AND  user_id    = :uid
+                   AND  view       = :view
+                   AND  project_id = :pid
+                   AND  id <> :id",
+                { ut : f.getUserType(), uid : f.getUserId(), view : f.getView(), pid : f.getProjectId(), id : f.getId() }
+            );
+        } else {
+            queryExecute(
+                "UPDATE pm_saved_filters
+                 SET    is_default = FALSE,
+                        updated_at = CURRENT_TIMESTAMP
+                 WHERE  user_type  = :ut
+                   AND  user_id    = :uid
+                   AND  view       = :view
+                   AND  project_id IS NULL
+                   AND  id <> :id",
+                { ut : f.getUserType(), uid : f.getUserId(), view : f.getView(), id : f.getId() }
+            );
+        }
+        f.setIsDefault( true );
+        f.save();
+    }
+
+    public void function clearDefault( required string id ){
+        var f = getFilter( arguments.id );
+        if ( isNull( f ) ) return;
+        f.setIsDefault( false );
+        f.save();
+    }
+
+    /**
+     * Convenience for wires: deserialize the JSON column into a
+     * struct, or {} on parse failure / missing data.
+     */
+    public struct function decodeFilters( required any filter ){
+        var raw = arguments.filter.getFiltersJson() ?: "";
+        if ( !len( raw ) ) return {};
+        try {
+            var parsed = jsonDeserialize( raw );
+            return isStruct( parsed ) ? parsed : {};
+        } catch ( any e ) {
+            return {};
+        }
+    }
+
+}

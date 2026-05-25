@@ -466,6 +466,28 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( registry.findTemplate( "tesserabx-pm.task_overdue",  "email", "contact" ) ).notToBeNull();
             } );
 
+            // ---- Phase 10b: cross-project view + saved filters.
+
+            it( "binds SavedFilterService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SavedFilterService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds SavedFilterDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SavedFilterDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds MyTasksService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "MyTasksService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the pm.agent.my-tasks navigation entry", function(){
+                var entry = variables.nav.findById( "pm.agent.my-tasks" );
+                expect( entry ).notToBeNull();
+                expect( entry.route   ).toBe( "/agent/pm/my-tasks" );
+                expect( entry.surface ).toBe( "agent" );
+                expect( entry.requiredPermission ).toBe( "pm.view" );
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

@@ -1,0 +1,135 @@
+/**
+ * SavedFilterServiceSpec: per-user saved filter CRUD + the
+ * one-default invariant.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "SavedFilterService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "SavedFilterService@tesserabx-pm", function(){
+
+            var fixtureOrgIds    = [];
+            var fixtureFilterIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var fid in fixtureFilterIds ) {
+                    try { queryExecute( "DELETE FROM pm_saved_filters WHERE id = :id", { id : fid } ); } catch ( any e ) {}
+                }
+                fixtureFilterIds = [];
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createFilter writes a row scoped to the user + view", function(){
+                var uid = createUUID();
+                var f = variables.svc.createFilter( {
+                    userType : "agent",
+                    userId   : uid,
+                    view     : "my-tasks",
+                    name     : "Open + urgent",
+                    filters  : { priority : "urgent" }
+                } );
+                fixtureFilterIds.append( f.getId() );
+                expect( f.getView() ).toBe( "my-tasks" );
+                expect( variables.svc.decodeFilters( f ).priority ).toBe( "urgent" );
+            } );
+
+            it( "rejects an invalid view", function(){
+                expect( function(){
+                    variables.svc.createFilter( { userType : "agent", userId : createUUID(), view : "gantt", name : "x" } );
+                } ).toThrow( type = "SavedFilterService.InvalidView" );
+            } );
+
+            it( "rejects an invalid user type", function(){
+                expect( function(){
+                    variables.svc.createFilter( { userType : "robot", userId : createUUID(), view : "my-tasks", name : "x" } );
+                } ).toThrow( type = "SavedFilterService.InvalidUser" );
+            } );
+
+            it( "listForView returns only the (user, view, project) tuple", function(){
+                var uid    = createUUID();
+                var other  = createUUID();
+                var fa = variables.svc.createFilter( { userType : "agent", userId : uid,   view : "my-tasks", name : "mine"  } );
+                var fb = variables.svc.createFilter( { userType : "agent", userId : other, view : "my-tasks", name : "theirs" } );
+                fixtureFilterIds.append( fa.getId() );
+                fixtureFilterIds.append( fb.getId() );
+
+                var rows = variables.svc.listForView( "agent", uid, "my-tasks" );
+                expect( arrayLen( rows ) ).toBe( 1 );
+                expect( rows[ 1 ].getId() ).toBe( fa.getId() );
+            } );
+
+            it( "setDefault flips one row to default and demotes any sibling", function(){
+                var uid = createUUID();
+                var fa = variables.svc.createFilter( { userType : "agent", userId : uid, view : "my-tasks", name : "a" } );
+                var fb = variables.svc.createFilter( { userType : "agent", userId : uid, view : "my-tasks", name : "b" } );
+                fixtureFilterIds.append( fa.getId() );
+                fixtureFilterIds.append( fb.getId() );
+
+                variables.svc.setDefault( fa.getId() );
+                expect( !!variables.svc.getFilter( fa.getId() ).getIsDefault() ).toBeTrue();
+                expect( !!variables.svc.getFilter( fb.getId() ).getIsDefault() ).toBeFalse();
+
+                variables.svc.setDefault( fb.getId() );
+                expect( !!variables.svc.getFilter( fa.getId() ).getIsDefault() ).toBeFalse();
+                expect( !!variables.svc.getFilter( fb.getId() ).getIsDefault() ).toBeTrue();
+
+                var def = variables.svc.findDefault( "agent", uid, "my-tasks" );
+                expect( def ).notToBeNull();
+                expect( def.getId() ).toBe( fb.getId() );
+            } );
+
+            it( "createFilter with isDefault=true sets default immediately", function(){
+                var uid = createUUID();
+                var f = variables.svc.createFilter( { userType : "agent", userId : uid, view : "my-tasks", name : "boot", isDefault : true } );
+                fixtureFilterIds.append( f.getId() );
+                expect( !!variables.svc.getFilter( f.getId() ).getIsDefault() ).toBeTrue();
+            } );
+
+            it( "scoped default per project for non-my-tasks views", function(){
+                var ctxA = setupProject( fixtureOrgIds );
+                var ctxB = setupProject( fixtureOrgIds );
+                var uid  = createUUID();
+                var fa = variables.svc.createFilter( { userType : "agent", userId : uid, view : "board", projectId : ctxA.project.getId(), name : "A" } );
+                var fb = variables.svc.createFilter( { userType : "agent", userId : uid, view : "board", projectId : ctxB.project.getId(), name : "B" } );
+                fixtureFilterIds.append( fa.getId() );
+                fixtureFilterIds.append( fb.getId() );
+                variables.svc.setDefault( fa.getId() );
+                variables.svc.setDefault( fb.getId() );
+                // Both stay default for their own project.
+                expect( !!variables.svc.getFilter( fa.getId() ).getIsDefault() ).toBeTrue();
+                expect( !!variables.svc.getFilter( fb.getId() ).getIsDefault() ).toBeTrue();
+            } );
+
+            it( "removeFilter deletes the row", function(){
+                var uid = createUUID();
+                var f = variables.svc.createFilter( { userType : "agent", userId : uid, view : "my-tasks", name : "delme" } );
+                variables.svc.removeFilter( f.getId() );
+                expect( variables.svc.getFilter( f.getId() ) ).toBeNull();
+            } );
+
+        } );
+    }
+
+    private struct function setupProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "sf-" & createUUID(), slug : "sf-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "sf-" & createUUID() } );
+        return { orgId : orgId, project : project };
+    }
+
+}

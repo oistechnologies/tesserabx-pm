@@ -1,0 +1,114 @@
+/**
+ * MyTasksService: cross-project task list for the current viewer.
+ *
+ * "My tasks" = every task in any accessible project where the
+ * viewer is either the assignee or a watcher. Works for both
+ * account families: the polymorphic assignee + watcher columns
+ * mean the same query shape covers an agent or a contact viewer.
+ *
+ * Accessible scope:
+ *   - Agent viewers: every task (the agent surface bypasses tenant
+ *     scope; cbSecurity gates the route to authenticated agents).
+ *   - Contact viewers: limited to tasks in projects where the
+ *     contact's organization has Option C visibility. Today the
+ *     wire passes the contact's organization_id; the service
+ *     scopes by that. Full Option C will land alongside Phase 11's
+ *     client portal embed which is the contact-facing surface for
+ *     this view.
+ *
+ * Filters (all optional):
+ *   search      : task title contains
+ *   priority    : "low" | "medium" | "high" | "urgent"
+ *   includeCompleted : boolean (defaults false so the view stays
+ *                     focused on open work)
+ *   dueBeforeDays    : numeric; e.g. 7 = due in the next week.
+ *                     Empty / 0 = no upper bound.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    public array function listForViewer(
+        required string viewerType,
+        required string viewerId,
+        string viewerOrganizationId = "",
+        struct filters = {}
+    ){
+        if ( !len( arguments.viewerType ) || !len( arguments.viewerId ) ) return [];
+
+        var f      = arguments.filters;
+        var search = trim( f.search   ?: "" );
+        var prio   = trim( f.priority ?: "" );
+        var incCom = !!( f.includeCompleted ?: false );
+        var dueDays = isNumeric( f.dueBeforeDays ?: "" ) && f.dueBeforeDays > 0 ? f.dueBeforeDays : 0;
+
+        // DISTINCT is unnecessary: pm_watchers' UNIQUE on
+        // (watchable_type, watchable_id, watcher_type, watcher_id)
+        // means the LEFT JOIN produces at most one row per task. PG
+        // also rejects DISTINCT when ORDER BY references columns
+        // missing from the SELECT list, which the t.created_at tie-
+        // breaker would.
+        var sql = "SELECT t.id, t.title, t.priority, t.status_id, t.assignee_type, t.assignee_id,
+                   t.due_date, t.completed_at, t.created_at, t.project_id, p.name AS project_name
+            FROM   pm_tasks t
+            JOIN   pm_projects p ON p.id = t.project_id
+            LEFT JOIN pm_watchers w
+                   ON w.watchable_type = 'task'
+                  AND w.watchable_id   = t.id
+                  AND w.watcher_type   = :viewerType
+                  AND w.watcher_id     = :viewerId
+            WHERE  t.deleted_at IS NULL
+              AND  p.deleted_at IS NULL
+              AND  (
+                    ( t.assignee_type = :viewerType AND t.assignee_id = :viewerId )
+                 OR ( w.id IS NOT NULL )
+              )";
+
+        var params = {
+            viewerType : arguments.viewerType,
+            viewerId   : arguments.viewerId
+        };
+
+        if ( arguments.viewerType == "contact" && len( arguments.viewerOrganizationId ) ) {
+            sql &= " AND p.organization_id = :orgId";
+            params.orgId = arguments.viewerOrganizationId;
+        }
+        if ( !incCom ) {
+            sql &= " AND t.completed_at IS NULL";
+        }
+        if ( len( prio ) ) {
+            sql &= " AND t.priority = :prio";
+            params.prio = prio;
+        }
+        if ( len( search ) ) {
+            sql &= " AND LOWER( t.title ) LIKE :search";
+            params.search = "%" & lCase( search ) & "%";
+        }
+        if ( dueDays > 0 ) {
+            sql &= " AND t.due_date IS NOT NULL AND t.due_date <= CAST( :dueBy AS date )";
+            params.dueBy = dateFormat( dateAdd( "d", dueDays, now() ), "yyyy-mm-dd" );
+        }
+
+        sql &= " ORDER BY ( t.due_date IS NULL ), t.due_date ASC, t.created_at ASC LIMIT 500";
+
+        var rows = queryExecute( sql, params );
+
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id            : rows.id[ i ],
+                title         : rows.title[ i ],
+                priority      : rows.priority[ i ],
+                statusId      : rows.status_id[ i ] ?: "",
+                assigneeType  : rows.assignee_type[ i ] ?: "",
+                assigneeId    : rows.assignee_id[ i ] ?: "",
+                dueDate       : isDate( rows.due_date[ i ] )     ? dateFormat( rows.due_date[ i ], "yyyy-mm-dd" ) : "",
+                completedAt   : isDate( rows.completed_at[ i ] ) ? dateTimeFormat( rows.completed_at[ i ], "iso" ) : "",
+                projectId     : rows.project_id[ i ],
+                projectName   : rows.project_name[ i ]
+            } );
+        }
+        return out;
+    }
+
+}

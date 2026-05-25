@@ -1,0 +1,26 @@
+/**
+ * ISavedFilterService: documentation contract for the per-user
+ * filter persistence service.
+ *
+ * Methods (live signatures on SavedFilterService):
+ *
+ *   any    getFilter( id )
+ *   array  listForView( userType, userId, view, projectId = "" )
+ *   any    findDefault( userType, userId, view, projectId = "" )
+ *   any    createFilter( data )
+ *   any    updateFilter( id, data )
+ *   any    removeFilter( id )
+ *   void   setDefault( id )
+ *   void   clearDefault( id )
+ *   struct decodeFilters( filter )
+ */
+class {
+
+    function init(){
+        throw(
+            type    = "ISavedFilterService.DoNotInstantiate",
+            message = "ISavedFilterService is a documentation contract. Inject SavedFilterService@tesserabx-pm instead."
+        );
+    }
+
+}

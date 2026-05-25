@@ -203,6 +203,18 @@ class {
                         sortWeight         : 210,
                         requiresAuth       : true,
                         requiredPermission : "pm.view"
+                    },
+                    // Phase 10b: cross-project "My tasks" view.
+                    {
+                        id                 : "pm.agent.my-tasks",
+                        surface            : "agent",
+                        menu               : "main",
+                        label              : "My tasks",
+                        route              : "/agent/pm/my-tasks",
+                        icon               : "bi bi-check2-square",
+                        sortWeight         : 205,
+                        requiresAuth       : true,
+                        requiredPermission : "pm.view"
                     }
                 ],
                 adminPages : [
@@ -694,6 +706,12 @@ class {
         binder.map( "PmTaskDueScanService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.PmTaskDueScanService" )
               .asSingleton();
+        binder.map( "SavedFilterService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.SavedFilterService" )
+              .asSingleton();
+        binder.map( "MyTasksService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.MyTasksService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -713,6 +731,9 @@ class {
               .asSingleton();
         binder.map( "TimeLogDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.TimeLogDto" )
+              .asSingleton();
+        binder.map( "SavedFilterDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.SavedFilterDto" )
               .asSingleton();
         binder.map( "LabelDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.LabelDto" )
@@ -752,6 +773,7 @@ class {
         binder.map( "Watcher@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Watcher"          );
         binder.map( "Mention@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.Mention"          );
         binder.map( "TimeLog@tesserabx-pm"          ).to( "#moduleMapping#.models.entities.TimeLog"          );
+        binder.map( "SavedFilter@tesserabx-pm"      ).to( "#moduleMapping#.models.entities.SavedFilter"      );
         binder.map( "Attachment@tesserabx-pm"       ).to( "#moduleMapping#.models.entities.Attachment"       );
     }
 

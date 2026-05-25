@@ -1,0 +1,165 @@
+<bx:output>
+<bx:script>
+    local.rows    = tasks();
+    local.filters = savedFilters();
+    local.mode    = data.groupBy ?: "project";
+
+    private string function priorityBadge( required string p ){
+        switch ( arguments.p ) {
+            case "urgent": return "danger";
+            case "high":   return "warning";
+            case "medium": return "secondary";
+            case "low":    return "info";
+            default:       return "secondary";
+        }
+    }
+
+    // Group rows for the table render.
+    local.groups = {};
+    local.groupOrder = [];
+    for ( local.r in local.rows ) {
+        local.key = ( local.mode eq "project" )
+            ? local.r.projectName
+            : ( local.mode eq "due" )
+                ? ( len( local.r.dueDate ) ? local.r.dueDate : "No due date" )
+                : "All";
+        if ( !structKeyExists( local.groups, local.key ) ) {
+            local.groups[ local.key ] = [];
+            local.groupOrder.append( local.key );
+        }
+        local.groups[ local.key ].append( local.r );
+    }
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+    <bx:if len( notice )>
+        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+            <span>#encodeForHTML( notice )#</span>
+            <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+        </div>
+    </bx:if>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label small mb-0" for="mt-q">Search</label>
+                    <input id="mt-q" type="search" class="form-control form-control-sm" wire:model.live.debounce.300ms="q" placeholder="Title contains...">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-0" for="mt-priority">Priority</label>
+                    <select id="mt-priority" class="form-select form-select-sm" wire:model.live="priority">
+                        <option value="">Any</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="urgent">urgent</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-0" for="mt-due">Due in (days)</label>
+                    <input id="mt-due" type="number" min="0" class="form-control form-control-sm" wire:model.live.debounce.300ms="dueBeforeDays" placeholder="any">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-0" for="mt-group">Group by</label>
+                    <select id="mt-group" class="form-select form-select-sm" wire:model.live="groupBy">
+                        <option value="project">Project</option>
+                        <option value="due">Due date</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end gap-2">
+                    <div class="form-check form-switch">
+                        <input id="mt-completed" type="checkbox" class="form-check-input" wire:model.live="includeCompleted">
+                        <label class="form-check-label small" for="mt-completed">Include completed</label>
+                    </div>
+                </div>
+                <div class="col-12 col-md-1 d-flex align-items-end">
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100" wire:click="clearFilters">Reset</button>
+                </div>
+            </div>
+
+            <hr>
+
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-5">
+                    <label class="form-label small mb-0" for="mt-saved">Saved filters</label>
+                    <select id="mt-saved" class="form-select form-select-sm" wire:change="applyFilterById( $event.target.value )">
+                        <option value="">(choose a saved filter)</option>
+                        <bx:loop array="#local.filters#" item="sf">
+                            <option value="#encodeForHTMLAttribute( sf.getId() )#" <bx:if data.activeFilterId eq sf.getId()>selected</bx:if>>
+                                #encodeForHTML( sf.getName() )#<bx:if !!sf.getIsDefault()> (default)</bx:if>
+                            </option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-0" for="mt-name">Save current as...</label>
+                    <input id="mt-name" type="text" class="form-control form-control-sm" wire:model="saveAsName" maxlength="100" placeholder="filter name">
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end">
+                    <button class="btn btn-primary btn-sm w-100" wire:click="saveCurrentAs"><i class="bi bi-save"></i> Save</button>
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end gap-1">
+                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" wire:click="setActiveAsDefault" title="Pin active filter as default for My Tasks"><i class="bi bi-pin-angle"></i> Default</button>
+                    <bx:if len( data.activeFilterId ?: "" )>
+                        <button class="btn btn-outline-danger btn-sm" wire:click="removeFilter('#encodeForHTMLAttribute( data.activeFilterId )#')" wire:confirm="Delete this saved filter?"><i class="bi bi-trash"></i></button>
+                    </bx:if>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <bx:if !arrayLen( local.rows )>
+        <p class="text-body-secondary fst-italic">No tasks match your filters.</p>
+    </bx:if>
+
+    <bx:loop array="#local.groupOrder#" item="gKey">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>#encodeForHTML( gKey )#</strong>
+                <span class="badge text-bg-secondary">#arrayLen( local.groups[ gKey ] )#</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Priority</th>
+                                <th>Due</th>
+                                <th>Project</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <bx:loop array="#local.groups[ gKey ]#" item="t">
+                                <tr>
+                                    <td>
+                                        <a href="/agent/pm/tasks/#encodeForURL( t.id )#" class="text-decoration-none">#encodeForHTML( t.title )#</a>
+                                        <bx:if len( t.completedAt )>
+                                            <span class="badge text-bg-success ms-2"><i class="bi bi-check-circle"></i> completed</span>
+                                        </bx:if>
+                                    </td>
+                                    <td>
+                                        <span class="badge text-bg-#priorityBadge( t.priority )#">#encodeForHTML( t.priority )#</span>
+                                    </td>
+                                    <td class="small">
+                                        <bx:if len( t.dueDate )>#encodeForHTML( t.dueDate )#<bx:else>—</bx:if>
+                                    </td>
+                                    <td class="small">
+                                        <a href="/agent/pm/projects/#encodeForURL( t.projectId )#" class="text-decoration-none">#encodeForHTML( t.projectName )#</a>
+                                    </td>
+                                    <td class="small">
+                                        <bx:if len( t.statusId )><code class="text-body-secondary">#encodeForHTML( left( t.statusId, 8 ) )#…</code><bx:else>—</bx:if>
+                                    </td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </bx:loop>
+</div>
+</bx:output>

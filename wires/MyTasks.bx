@@ -1,0 +1,170 @@
+/**
+ * MyTasks: cross-project list of every task the viewer is the
+ * assignee of OR watches, grouped by project or by due date.
+ *
+ * Embedded in views/myTasks/index.bxm via /agent/pm/my-tasks. The
+ * BUILD-PLAN says this wire works for both agents and contacts;
+ * the agent-side route is what Phase 10b ships, the contact-side
+ * mount lands with Phase 11's client portal embed.
+ *
+ * Filters + grouping URL-persisted via queryString. SavedFilter
+ * integration: on mount the wire pulls the user's default for
+ * view="my-tasks" (project_id IS NULL) and seeds data from it.
+ * "Save as..." persists the current filter set as a new named
+ * filter; "Set default" promotes the active filter.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="myTasksService"     inject="MyTasksService@tesserabx-pm";
+    property name="savedFilterService" inject="SavedFilterService@tesserabx-pm";
+    property name="auth"               inject="AuthenticationService@cbauth";
+
+    data = {
+        "q"                : "",
+        "priority"         : "",
+        "includeCompleted" : false,
+        "dueBeforeDays"    : "",
+        "groupBy"          : "project",
+        "activeFilterId"   : "",
+        "saveAsName"       : "",
+        "notice"           : "",
+        "noticeKind"       : "info"
+    };
+
+    queryString = [ "q", "priority", "includeCompleted", "dueBeforeDays", "groupBy", "activeFilterId" ];
+
+    function onMount( required struct params = {} ){
+        // If no activeFilterId is in the URL, seed from the user's
+        // default. Loading by id directly trumps the default.
+        if ( !len( data.activeFilterId ?: "" ) ) {
+            var def = savedFilterService.findDefault(
+                userType : "agent",
+                userId   : currentAgentId(),
+                view     : "my-tasks"
+            );
+            if ( !isNull( def ) ) applyFilter( def );
+        } else {
+            var f = savedFilterService.getFilter( data.activeFilterId );
+            if ( !isNull( f ) ) applyFilter( f );
+        }
+    }
+
+    function tasks(){
+        return myTasksService.listForViewer(
+            viewerType : "agent",
+            viewerId   : currentAgentId(),
+            filters    : {
+                search           : data.q,
+                priority         : data.priority,
+                includeCompleted : data.includeCompleted,
+                dueBeforeDays    : data.dueBeforeDays
+            }
+        );
+    }
+
+    function savedFilters(){
+        return savedFilterService.listForView(
+            userType : "agent",
+            userId   : currentAgentId(),
+            view     : "my-tasks"
+        );
+    }
+
+    // ---------------- Actions ----------------
+
+    function clearFilters(){
+        data.q                = "";
+        data.priority         = "";
+        data.includeCompleted = false;
+        data.dueBeforeDays    = "";
+        data.activeFilterId   = "";
+    }
+
+    function applyFilterById( id ){
+        var f = savedFilterService.getFilter( arguments.id ?: "" );
+        if ( isNull( f ) ) return;
+        applyFilter( f );
+        data.activeFilterId = f.getId();
+    }
+
+    function saveCurrentAs(){
+        var n = trim( data.saveAsName ?: "" );
+        if ( !len( n ) ) {
+            notice( "Name the saved filter first.", "warning" );
+            return;
+        }
+        try {
+            var saved = savedFilterService.createFilter( {
+                userType : "agent",
+                userId   : currentAgentId(),
+                view     : "my-tasks",
+                name     : n,
+                filters  : currentFilterStruct()
+            } );
+            data.activeFilterId = saved.getId();
+            data.saveAsName     = "";
+            notice( "Saved.", "success" );
+        } catch ( any e ) {
+            notice( "Could not save: " & e.message, "danger" );
+        }
+    }
+
+    function setActiveAsDefault(){
+        if ( !len( data.activeFilterId ?: "" ) ) {
+            notice( "Apply a saved filter first.", "warning" );
+            return;
+        }
+        try {
+            savedFilterService.setDefault( data.activeFilterId );
+            notice( "Default set.", "success" );
+        } catch ( any e ) {
+            notice( "Could not set default: " & e.message, "danger" );
+        }
+    }
+
+    function removeFilter( id ){
+        try {
+            savedFilterService.removeFilter( arguments.id ?: "" );
+            if ( data.activeFilterId == arguments.id ) data.activeFilterId = "";
+            notice( "Filter removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove filter: " & e.message, "danger" );
+        }
+    }
+
+    // ---------------- internals ----------------
+
+    private void function applyFilter( required any f ){
+        var c = savedFilterService.decodeFilters( arguments.f );
+        data.q                = c.q                ?: "";
+        data.priority         = c.priority         ?: "";
+        data.includeCompleted = !!( c.includeCompleted ?: false );
+        data.dueBeforeDays    = c.dueBeforeDays    ?: "";
+        data.groupBy          = c.groupBy          ?: "project";
+    }
+
+    private struct function currentFilterStruct(){
+        return {
+            q                : data.q                ?: "",
+            priority         : data.priority         ?: "",
+            includeCompleted : !!data.includeCompleted,
+            dueBeforeDays    : data.dueBeforeDays    ?: "",
+            groupBy          : data.groupBy          ?: "project"
+        };
+    }
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

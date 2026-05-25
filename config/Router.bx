@@ -85,6 +85,10 @@ class {
         // ---- Time reports.
 
         route( "time-reports" ).to( "TimeReports.index" );
+
+        // ---- My tasks (cross-project).
+
+        route( "my-tasks" ).to( "MyTasks.index" );
     }
 
 }

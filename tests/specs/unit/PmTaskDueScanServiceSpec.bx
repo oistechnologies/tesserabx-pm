@@ -54,7 +54,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "scanOverdue notifies a task with a past due date once", function(){
-                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : -3, assigned : true );
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : -48, assigned : true );
                 var notified = variables.svc.scanOverdue();
                 expect( arrayContains( notified, ctx.taskId ) ).toBeTrue();
 
@@ -69,7 +69,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "resetState re-arms a previously notified task", function(){
-                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : -3, assigned : true );
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : -48, assigned : true );
                 variables.svc.scanOverdue();
                 variables.svc.resetState( ctx.taskId );
                 var notified = variables.svc.scanOverdue();

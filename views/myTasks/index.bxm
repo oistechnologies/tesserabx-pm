@@ -1,0 +1,15 @@
+<bx:output>
+<div class="container-fluid">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/agent/pm" class="link-secondary">PM</a></li>
+            <li class="breadcrumb-item active" aria-current="page">My tasks</li>
+        </ol>
+    </nav>
+
+    <h1 class="mb-3 fs-3">My tasks</h1>
+    <p class="text-body-secondary small">Every task across every project where you are the assignee or a watcher.</p>
+
+    #wire( name = "MyTasks@tesserabx-pm" )#
+</div>
+</bx:output>

@@ -1,0 +1,27 @@
+/**
+ * SavedFilter: a per-user named filter set scoped to a view (and
+ * optionally to a single project).
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="pm_saved_filters"
+    accessors="true"
+{
+
+    property name="id";
+    property name="userType"     column="user_type";
+    property name="userId"       column="user_id";
+    property name="view";
+    property name="projectId"    column="project_id";
+    property name="name";
+    property name="filtersJson"  column="filters_json";
+    property name="isDefault"    column="is_default";
+
+    property name="createdAt"    column="created_at" sqltype="timestamp";
+    property name="updatedAt"    column="updated_at" sqltype="timestamp";
+
+    function project(){
+        return belongsTo( "Project@tesserabx-pm", "project_id" );
+    }
+
+}
