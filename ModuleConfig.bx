@@ -60,7 +60,9 @@ class {
                     "apiResources", "webhookEvents", "assets",
                     "auditEvents", "dashboardWidgets",
                     "ticketPanels", "automationActions",
-                    "notificationTemplates"
+                    "notificationTemplates",
+                    // Phase 12a: AI features + embedding consumers.
+                    "aiFeatures", "embeddingConsumers"
                 ],
                 requiresAi     : false,
 
@@ -141,6 +143,12 @@ class {
                     // entryPoint, so it is registered here rather than
                     // in config/Router.bx.
                     { path : "/agent/admin/pm/templates", verbs : "GET", module : "tesserabx-pm", handler : "admin.Templates", action : "index" },
+                    // Phase 12a: one-shot trigger for the host's
+                    // EmbeddingScheduler. Lets an admin backfill PM
+                    // task embeddings on demand without waiting for
+                    // the hourly sweep. Returns the per-consumer
+                    // report as JSON.
+                    { path : "/agent/admin/pm/embed-backlog", verbs : "POST", module : "tesserabx-pm", handler : "admin.EmbeddingBackfill", action : "run" },
 
                     // Phase 11: client portal surface at /pm. The
                     // Phase 0 single /pm -> Main.index claim is
@@ -587,8 +595,42 @@ class {
                         zone               : "agent-home"
                     }
                 ],
-                aiFeatures              : [],
-                embeddingConsumers      : [],
+                // Phase 12a: AI features. The embedding feature is
+                // the only one PM ships in 12a; 12b will add
+                // completion features (summarize / suggest /
+                // priority-explain). `requiresAi : true` is
+                // implicit on every feature registry entry; the UI
+                // contributions that surface these features carry
+                // their own `requiresAi : true` so they vanish when
+                // AI_ENABLED=false.
+                aiFeatures              : [
+                    {
+                        id                  : "tesserabx-pm.task-embed",
+                        label               : "PM task embedding",
+                        description         : "Embeds a PM task's title + description into pgvector for semantic similarity searches (Related tasks, find-similar-on-create).",
+                        defaultSystemPrompt : "",
+                        defaultModel        : "",
+                        kind                : "embedding"
+                    }
+                ],
+                // Phase 12a: embedding consumer for PM tasks. The
+                // host's hourly EmbeddingScheduler walks every
+                // registered consumer's listEntitiesNeedingIndex
+                // and embeds the entries via AiMiddleware.embed.
+                // PmTaskEmbedder also indexes new tasks
+                // immediately on onPmTaskCreated; this entry is
+                // the catch-all for tasks whose embedding drifts
+                // from their current text.
+                embeddingConsumers      : [
+                    {
+                        id          : "tesserabx-pm.task",
+                        label       : "PM tasks",
+                        description : "Embeds the title + description of every PM task into pm_tasks.embedding for semantic similarity.",
+                        feature     : "tesserabx-pm.task-embed",
+                        mapping     : "TaskEmbeddingConsumer@tesserabx-pm",
+                        dimension   : 1536
+                    }
+                ],
 
                 // Per-phase: help content, static assets.
                 helpSections            : [],
@@ -665,6 +707,19 @@ class {
                 class      : "#moduleMapping#.interceptors.PmNotificationDispatcher",
                 name       : "PmNotificationDispatcher",
                 properties : {}
+            },
+            // Phase 12a: indexes a new PM task's embedding
+            // immediately on onPmTaskCreated so the Related Tasks
+            // panel populates without waiting for the host's
+            // hourly EmbeddingScheduler sweep. Short-circuits
+            // when AI is disabled. Lazily resolves AiMiddleware
+            // because module interceptors instantiate before
+            // module bindings (the same trick Phase 4b's
+            // ProjectEventLogger uses).
+            {
+                class      : "#moduleMapping#.interceptors.PmTaskEmbedder",
+                name       : "PmTaskEmbedder",
+                properties : {}
             }
         ];
     }
@@ -724,6 +779,17 @@ class {
               .asSingleton();
         binder.map( "MyTasksService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.MyTasksService" )
+              .asSingleton();
+        // Phase 12a: semantic similarity + embedding consumer
+        // bindings. SimilarityService is the read path
+        // (find-similar-to-task / find-similar-to-text);
+        // TaskEmbeddingConsumer is the write path that the host's
+        // EmbeddingConsumerRegistry@ai resolves by mapping name.
+        binder.map( "SimilarityService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.SimilarityService" )
+              .asSingleton();
+        binder.map( "TaskEmbeddingConsumer@tesserabx-pm" )
+              .to( "#moduleMapping#.models.ai.TaskEmbeddingConsumer" )
               .asSingleton();
 
         // DTOs (singleton).

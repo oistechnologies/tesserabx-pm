@@ -1,0 +1,149 @@
+/**
+ * SimilarityService: top-N nearest-neighbor lookup on
+ * pm_tasks.embedding using pgvector's cosine distance operator.
+ *
+ * Two entry points:
+ *
+ *   findSimilarToTask(taskId, limit, excludeSelf = true)
+ *     Pulls the source task's stored embedding and runs the
+ *     nearest-neighbor query against it. No second AI call. Used
+ *     by the Related Tasks panel.
+ *
+ *   findSimilarToText(text, limit, projectId = "")
+ *     Embeds the supplied text on the fly via AiMiddleware and
+ *     queries. Used by the find-similar-on-create suggestion: an
+ *     agent typing a new title can see if a duplicate already
+ *     exists before saving.
+ *
+ * Both short-circuit to an empty array when AI is disabled OR the
+ * source has no embedding yet. The Phase 4 UI registry already
+ * hides the entry points that surface this service when
+ * AI_ENABLED=false, but defensive checks keep service-direct
+ * callers safe.
+ *
+ * Distance returned is cosine: 0 (identical) to 2 (opposite);
+ * lower is better. The UI converts to a "similarity" percentage
+ * for display.
+ */
+class singleton=true {
+
+    property name="aiMiddleware" inject="AiMiddleware@ai";
+    property name="aiCapability" inject="AiCapability@ai";
+    property name="wirebox"      inject="wirebox";
+
+    variables.EMBED_FEATURE = "tesserabx-pm.task-embed";
+
+    /**
+     * Nearest neighbors to a task's own embedding. Returns array of
+     *   { id, title, project_id, project_name, priority, distance }.
+     * excludeSelf = true (default) keeps the source task off its
+     * own results.
+     */
+    public array function findSimilarToTask(
+        required string taskId,
+        numeric limit       = 5,
+        boolean excludeSelf = true
+    ){
+        if ( !aiCapability.isEnabled() ) return [];
+
+        // Pull the stored embedding text literal so we can feed it
+        // back into the cosine query without re-embedding. cast(... as text)
+        // over `::text` for the same JDBC named-param parser collision
+        // the KB service avoids on vector / date casts.
+        var src = queryExecute(
+            "SELECT cast( embedding as text ) AS embedding_text, project_id
+             FROM   pm_tasks
+             WHERE  id = :id AND deleted_at IS NULL",
+            { id : arguments.taskId }
+        );
+        if ( !src.recordCount ) return [];
+        var emb = src.embedding_text[ 1 ] ?: "";
+        if ( !len( emb ) ) return [];
+
+        return runNearestNeighborQuery(
+            vectorLiteral : emb,
+            excludeId     : arguments.excludeSelf ? arguments.taskId : "",
+            projectId     : "",
+            limit         : arguments.limit
+        );
+    }
+
+    /**
+     * Find tasks similar to a free-text query (typically a task
+     * title an agent is in the middle of typing). Optionally
+     * scope to a single project so the find-similar-on-create
+     * suggestion only surfaces in-project matches.
+     */
+    public array function findSimilarToText(
+        required string text,
+        numeric limit    = 5,
+        string projectId = ""
+    ){
+        if ( !aiCapability.isEnabled() ) return [];
+        if ( !len( trim( arguments.text ) ) ) return [];
+
+        var result = aiMiddleware.embed(
+            feature : variables.EMBED_FEATURE,
+            text    : arguments.text
+        );
+        if ( ( result.outcome ?: "" ) != "ok" ) return [];
+
+        var vec = result.vector ?: [];
+        if ( !arrayLen( vec ) ) return [];
+        var literal = "[" & vec.toList( "," ) & "]";
+
+        return runNearestNeighborQuery(
+            vectorLiteral : literal,
+            excludeId     : "",
+            projectId     : arguments.projectId,
+            limit         : arguments.limit
+        );
+    }
+
+    // ---------- internals ----------
+
+    private array function runNearestNeighborQuery(
+        required string  vectorLiteral,
+        string  excludeId = "",
+        string  projectId = "",
+        numeric limit     = 5
+    ){
+        // cast( :v as vector ) over `::vector` for the same JDBC
+        // named-param parser collision the KB service avoids.
+        var sql = "
+            SELECT  t.id, t.title, t.project_id, t.priority,
+                    p.name AS project_name,
+                    ( t.embedding <=> cast( :v as vector ) ) AS distance
+            FROM    pm_tasks t
+            JOIN    pm_projects p ON p.id = t.project_id
+            WHERE   t.embedding IS NOT NULL
+              AND   t.deleted_at IS NULL
+              AND   p.deleted_at IS NULL
+        ";
+        var params = { v : arguments.vectorLiteral };
+        if ( len( arguments.excludeId ) ) {
+            sql &= " AND t.id <> :excludeId";
+            params.excludeId = arguments.excludeId;
+        }
+        if ( len( arguments.projectId ) ) {
+            sql &= " AND t.project_id = :pid";
+            params.pid = arguments.projectId;
+        }
+        sql &= " ORDER BY t.embedding <=> cast( :v as vector ) LIMIT " & int( arguments.limit );
+
+        var rows = queryExecute( sql, params );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id           : rows.id[ i ],
+                title        : rows.title[ i ],
+                project_id   : rows.project_id[ i ],
+                project_name : rows.project_name[ i ] ?: "",
+                priority     : rows.priority[ i ] ?: "",
+                distance     : rows.distance[ i ]
+            } );
+        }
+        return out;
+    }
+
+}

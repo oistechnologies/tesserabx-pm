@@ -1,0 +1,86 @@
+/**
+ * TaskEmbeddingConsumer: the EmbeddingConsumerRegistry@ai contract
+ * implementation for PM tasks (Phase 12a).
+ *
+ * The host's embedding pipeline calls this class through three
+ * methods (documented at EXTENSIONS.md "embedding consumers"):
+ *
+ *   getTextForEmbedding(taskId)    -> the string to embed
+ *   saveEmbedding(taskId, vector)  -> persist the vector
+ *   listEntitiesNeedingIndex()     -> ids that need (re)indexing
+ *
+ * Text: title + description. Empty descriptions are tolerated.
+ * Storage: pm_tasks.embedding (vector(1536), HNSW indexed).
+ * Backlog: tasks whose embedding is NULL.
+ *
+ * Used by:
+ *   - PmTaskEmbedder interceptor (immediate indexing on
+ *     onPmTaskCreated).
+ *   - The host's EmbeddingScheduler hourly sweep (catches updates
+ *     where title / description changes but the consumer was not
+ *     re-fired).
+ *   - The /tasks/EmbedBacklog.bx CommandBox task script (one-shot
+ *     backfill after an install / import).
+ *
+ * AI-off invariant: this class is import-safe even when AI is
+ * disabled. The host's middleware short-circuits before any
+ * provider call; this class never imports `bx-ai` directly per
+ * the PM AI-isolation rule (CLAUDE.md §2).
+ */
+class singleton=true {
+
+    /**
+     * Assemble the text the embedding model sees for one task.
+     * Concatenates title + description with a separator so the
+     * model gets both signals without title overweight. Returns ""
+     * (empty string) for unknown ids — the scheduler skips empties
+     * so the entry simply does not advance.
+     */
+    public string function getTextForEmbedding( required string taskId ){
+        var rows = queryExecute(
+            "SELECT title, description FROM pm_tasks WHERE id = :id AND deleted_at IS NULL",
+            { id : arguments.taskId }
+        );
+        if ( !rows.recordCount ) return "";
+        var title = rows.title[ 1 ] ?: "";
+        var desc  = rows.description[ 1 ] ?: "";
+        if ( !len( trim( title ) ) && !len( trim( desc ) ) ) return "";
+        return trim( title ) & ( len( trim( desc ) ) ? ( char( 10 ) & char( 10 ) & trim( desc ) ) : "" );
+    }
+
+    /**
+     * Persist a freshly-computed embedding. Mirrors the KB pattern
+     * exactly: serialise to pgvector's `[1,2,3]` literal and let
+     * Postgres cast via `cast( :v as vector )` so the JDBC named-
+     * parameter parser does not collide with the `::vector`
+     * shorthand.
+     */
+    public void function saveEmbedding( required string taskId, required array vector ){
+        if ( !arguments.vector.len() ) return;
+        var literal = "[" & arguments.vector.toList( "," ) & "]";
+        queryExecute(
+            "UPDATE pm_tasks SET embedding = cast( :v as vector ), updated_at = updated_at WHERE id = :id",
+            { id : arguments.taskId, v : literal }
+        );
+    }
+
+    /**
+     * Return up to `limit` task ids whose embedding is NULL and
+     * which are not soft-deleted. The host scheduler walks this
+     * list each tick and re-embeds the entries through
+     * AiMiddleware.embed.
+     */
+    public array function listEntitiesNeedingIndex( numeric limit = 200 ){
+        var rows = queryExecute(
+            "SELECT id FROM pm_tasks
+             WHERE  embedding IS NULL
+               AND  deleted_at IS NULL
+             ORDER BY created_at DESC
+             LIMIT " & int( arguments.limit )
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.id[ i ] );
+        return out;
+    }
+
+}

@@ -29,6 +29,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.webhookRegistry  = variables.wb.getInstance( "WebhookEventRegistry@api" );
         variables.auditService     = variables.wb.getInstance( "AuditService@audit" );
         variables.widgetRegistry   = variables.wb.getInstance( "DashboardWidgetRegistry@reporting" );
+        variables.aiFeatureRegistry        = variables.wb.getInstance( "AiFeatureRegistry@ai" );
+        variables.embeddingConsumerRegistry = variables.wb.getInstance( "EmbeddingConsumerRegistry@ai" );
     }
 
     function run(){
@@ -517,6 +519,39 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( claim.module  ).toBe( "tesserabx-pm" );
                 expect( claim.handler ).toBe( "portal.Main" );
                 expect( claim.action  ).toBe( "index" );
+            } );
+
+            // ---- Phase 12a: AI embeddings + similarity.
+
+            it( "binds SimilarityService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SimilarityService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds TaskEmbeddingConsumer@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TaskEmbeddingConsumer@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the tesserabx-pm.task-embed AI feature", function(){
+                var entry = variables.aiFeatureRegistry.findById( "tesserabx-pm.task-embed" );
+                expect( entry ).notToBeNull();
+                expect( entry.kind       ).toBe( "embedding" );
+                expect( entry.requiresAi ).toBeTrue();
+            } );
+
+            it( "registers the tesserabx-pm.task embedding consumer pointing at the consumer mapping", function(){
+                var entry = variables.embeddingConsumerRegistry.findById( "tesserabx-pm.task" );
+                expect( entry ).notToBeNull();
+                expect( entry.mapping   ).toBe( "TaskEmbeddingConsumer@tesserabx-pm" );
+                expect( entry.feature   ).toBe( "tesserabx-pm.task-embed" );
+                expect( entry.dimension ).toBe( 1536 );
+            } );
+
+            it( "claims the POST /agent/admin/pm/embed-backlog operator endpoint", function(){
+                var claim = variables.routeClaims.findByPath( "/agent/admin/pm/embed-backlog" );
+                expect( claim ).notToBeNull();
+                expect( claim.module  ).toBe( "tesserabx-pm" );
+                expect( claim.handler ).toBe( "admin.EmbeddingBackfill" );
+                expect( claim.action  ).toBe( "run" );
             } );
 
             // Phase 2+ probes are appended below as registries are

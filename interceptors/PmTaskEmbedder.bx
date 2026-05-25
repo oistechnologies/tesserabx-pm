@@ -1,0 +1,79 @@
+/**
+ * PmTaskEmbedder: indexes a new PM task's embedding immediately
+ * after creation so the Related Tasks panel populates without
+ * waiting for the host's hourly EmbeddingScheduler sweep.
+ *
+ * Listens to: onPmTaskCreated
+ *
+ * Flow:
+ *   1. Pull the task's getTextForEmbedding text via the consumer.
+ *   2. Ask AiMiddleware.embed for the vector.
+ *   3. Hand the vector to consumer.saveEmbedding.
+ *
+ * Skips entirely when:
+ *   - AI is disabled (AiMiddleware.isEnabled returns false).
+ *   - The text is empty (a task with no title + no description
+ *     can't be embedded; the next title save / scheduler sweep
+ *     will pick it up).
+ *
+ * The host's `ai:embedding-sweep` task is the catch-all that
+ * indexes tasks whose embeddings drift from their current text
+ * (e.g. an updateTask that does not re-fire onPmTaskCreated).
+ *
+ * AI-isolation invariant: this interceptor resolves AiMiddleware
+ * lazily via `wirebox.getInstance` (the same trick Phase 4b's
+ * ProjectEventLogger uses). It never imports `bx-ai` directly.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onPmTaskCreated( event, interceptData, rc, prc ){
+        try {
+            var taskId = arguments.interceptData.entity.id ?: "";
+            if ( !len( taskId ) ) return;
+
+            if ( !aiCapability().isEnabled() ) return;
+
+            var consumer = taskConsumer();
+            var text     = consumer.getTextForEmbedding( taskId );
+            if ( !len( trim( text ) ) ) return;
+
+            var result = aiMiddleware().embed( feature : "tesserabx-pm.task-embed", text : text );
+            if ( ( result.outcome ?: "" ) != "ok" ) return;
+            consumer.saveEmbedding( taskId, result.vector ?: [] );
+        } catch ( any e ) {
+            writeLog(
+                text : "PmTaskEmbedder.onPmTaskCreated failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private any function aiCapability(){
+        if ( !structKeyExists( variables, "_cap" ) ) {
+            variables._cap = wirebox.getInstance( "AiCapability@ai" );
+        }
+        return variables._cap;
+    }
+
+    private any function aiMiddleware(){
+        if ( !structKeyExists( variables, "_ai" ) ) {
+            variables._ai = wirebox.getInstance( "AiMiddleware@ai" );
+        }
+        return variables._ai;
+    }
+
+    private any function taskConsumer(){
+        if ( !structKeyExists( variables, "_tc" ) ) {
+            variables._tc = wirebox.getInstance( "TaskEmbeddingConsumer@tesserabx-pm" );
+        }
+        return variables._tc;
+    }
+
+}

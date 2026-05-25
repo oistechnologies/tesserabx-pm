@@ -1,0 +1,17 @@
+<bx:output>
+<bx:set local.matches = rows()>
+<div data-pm-wire-id="#_getID()#"<bx:if !arrayLen( local.matches )> style="display:none"</bx:if>>
+<div class="card"><div class="card-body">
+<h2 class="h6 mb-2 text-body-secondary"><i class="bi bi-stars"></i> Related tasks</h2>
+<ul class="list-unstyled mb-0">
+<bx:loop array="#local.matches#" item="m"><li class="border-top pt-2 pb-2">
+<a href="/agent/pm/tasks/#encodeForURL( m.id )#" class="text-decoration-none"><strong class="small">#encodeForHTML( m.title )#</strong></a>
+<div class="small text-body-secondary">
+<span class="badge text-bg-light border me-1">#scorePercent( m.distance )#% similar</span>
+<bx:if len( m.priority )><span class="badge text-bg-light border me-1">#encodeForHTML( m.priority )#</span></bx:if>
+<span>in #encodeForHTML( m.project_name )#</span>
+</div></li></bx:loop>
+</ul>
+</div></div>
+</div>
+</bx:output>

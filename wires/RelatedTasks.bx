@@ -1,0 +1,48 @@
+/**
+ * RelatedTasks: semantic-similarity "Related tasks" panel on the
+ * task show page (Phase 12a). Reads SimilarityService.findSimilarToTask
+ * for the current task.
+ *
+ * AI-off invariant: the panel mounts unconditionally, but the
+ * service short-circuits to an empty array when AI is disabled.
+ * The template renders nothing when the result list is empty
+ * (matches the empty-state convention from Phase 11's linked-tasks
+ * panel). The ticketPanels / dashboardWidgets registries that
+ * front this UX carry `requiresAi : true` so they only show when
+ * AI is on; this wire's data path stays AI-safe regardless.
+ *
+ * Embed from views/tasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "RelatedTasks@tesserabx-pm",
+ *       params = { taskId : prc.task.getId() }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="similarityService" inject="SimilarityService@tesserabx-pm";
+
+    data = {
+        "taskId" : ""
+    };
+
+    function onMount( required struct params = {} ){
+        data.taskId = arguments.params.taskId ?: "";
+    }
+
+    function rows(){
+        if ( !len( data.taskId ) ) return [];
+        return similarityService.findSimilarToTask( taskId : data.taskId, limit : 5 );
+    }
+
+    /**
+     * Convert pgvector cosine distance (0..2; lower is closer) into
+     * a friendly similarity percentage (100% identical, 0% opposite).
+     * The wire template renders it via `#scorePercent(...)#`.
+     */
+    function scorePercent( required numeric distance ){
+        var clamped = max( 0, min( 2, arguments.distance ) );
+        return numberFormat( ( 1 - ( clamped / 2 ) ) * 100, "0" );
+    }
+
+}
