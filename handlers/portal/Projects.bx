@@ -1,0 +1,93 @@
+/**
+ * portal:Projects handler. Client-facing project list + detail at
+ * /pm/projects and /pm/projects/:id.
+ *
+ * Contacts see projects in their organization(s); VisibilityService
+ * enforces Option C on the per-project task list rendered on show.
+ * Agent accounts are excluded by the host's portal firewall.
+ *
+ * Internal task fields (assignee, completed_at, sort_order, etc.)
+ * still render; only comments and is_client_visible carry the
+ * portal restriction.
+ */
+class {
+
+    property name="projectService"    inject="ProjectService@tesserabx-pm";
+    property name="taskService"       inject="TaskService@tesserabx-pm";
+    property name="visibilityService" inject="VisibilityService@tesserabx-pm";
+    property name="auth"              inject="AuthenticationService@cbauth";
+    property name="messagebox"        inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        prc.currentContact = currentContact();
+    }
+
+    function index( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        prc.pageTitle = "Projects";
+
+        // VisibilityService exposes a query builder per viewer that
+        // composes Option C scoping; we run it through Quick to
+        // hydrate entities so the view can read names + lifecycle
+        // status.
+        prc.projects = visibilityService
+            .projectsQueryForViewer( viewer = viewerStruct( me ) )
+            .orderBy( "name", "asc" )
+            .get();
+        event.setView( view = "portal/projects/index", module = "tesserabx-pm" );
+    }
+
+    function show( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var project = projectService.getProject( rc.id ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+        var viewer = viewerStruct( me );
+        if ( !visibilityService.canViewProject( viewer, project ) ) {
+            messagebox.warn( "That project is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+
+        prc.pageTitle = project.getName();
+        prc.project   = project;
+        prc.tasks     = visibilityService
+            .tasksQueryForViewer( viewer = viewer, projectId = project.getId() )
+            .orderBy( "sort_order", "asc" )
+            .orderBy( "created_at", "asc" )
+            .get();
+        event.setView( view = "portal/projects/show", module = "tesserabx-pm" );
+    }
+
+    // ---------- internals ----------
+
+    private any function currentContact(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? javaCast( "null", "" ) : u;
+        } catch ( any e ) {
+            return javaCast( "null", "" );
+        }
+    }
+
+    private struct function viewerStruct( required any contact ){
+        return {
+            accountType    : "contact",
+            accountId      : arguments.contact.getId(),
+            organizationId : arguments.contact.getOrganizationId() ?: ""
+        };
+    }
+
+}

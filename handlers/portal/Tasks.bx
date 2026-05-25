@@ -1,0 +1,112 @@
+/**
+ * portal:Tasks handler. Client-facing task detail at /pm/tasks/:id.
+ *
+ * Comment posting routes through the existing CommentService which
+ * forces is_internal = false for contact authors (BUILD-PLAN §3.5),
+ * so the portal composer cannot leak an internal note even if the
+ * form is tampered with.
+ */
+class {
+
+    property name="taskService"       inject="TaskService@tesserabx-pm";
+    property name="commentService"    inject="CommentService@tesserabx-pm";
+    property name="visibilityService" inject="VisibilityService@tesserabx-pm";
+    property name="auth"              inject="AuthenticationService@cbauth";
+    property name="messagebox"        inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        prc.currentContact = currentContact();
+    }
+
+    function show( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+        var viewer = viewerStruct( me );
+        if ( !visibilityService.canViewTask( viewer, task ) ) {
+            messagebox.warn( "That task is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+
+        prc.pageTitle = task.getTitle();
+        prc.task      = task;
+        prc.viewer    = viewer;
+        prc.comments  = commentService.listForCommentable(
+            commentableType : "task",
+            commentableId   : task.getId(),
+            viewer          : viewer
+        );
+        event.setView( view = "portal/tasks/show", module = "tesserabx-pm" );
+    }
+
+    function postComment( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+        var viewer = viewerStruct( me );
+        if ( !visibilityService.canViewTask( viewer, task ) ) {
+            messagebox.warn( "That task is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+
+        var body = trim( rc.body ?: "" );
+        if ( !len( body ) ) {
+            messagebox.warn( "Comment cannot be blank." );
+            relocate( uri = "/pm/tasks/" & task.getId() );
+            return;
+        }
+        try {
+            commentService.createComment( {
+                commentableType : "task",
+                commentableId   : task.getId(),
+                organizationId  : task.getOrganizationId(),
+                authorType      : "contact",
+                authorId        : me.getId(),
+                body            : body
+            } );
+            messagebox.info( "Comment posted." );
+        } catch ( any e ) {
+            messagebox.error( "Could not post comment: " & e.message );
+        }
+        relocate( uri = "/pm/tasks/" & task.getId() );
+    }
+
+    // ---------- internals ----------
+
+    private any function currentContact(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? javaCast( "null", "" ) : u;
+        } catch ( any e ) {
+            return javaCast( "null", "" );
+        }
+    }
+
+    private struct function viewerStruct( required any contact ){
+        return {
+            accountType    : "contact",
+            accountId      : arguments.contact.getId(),
+            organizationId : arguments.contact.getOrganizationId() ?: ""
+        };
+    }
+
+}

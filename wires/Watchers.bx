@@ -1,0 +1,135 @@
+/**
+ * Watchers: per-watchable card listing current watchers and
+ * exposing a watch / unwatch toggle for the current viewer.
+ *
+ * `WatcherService.autoWatchOnAssignment` and `autoWatchOnComment`
+ * cover the implicit-subscription paths (assigned + commented).
+ * This wire is the explicit path: an agent can click to follow
+ * any task or subtask without having to comment or be assigned.
+ *
+ * Embed from views/tasks/show.bxm and views/subtasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "Watchers@tesserabx-pm",
+ *       params = {
+ *           watchableType  : "task",        // or "subtask"
+ *           watchableId    : prc.task.getId(),
+ *           organizationId : prc.task.getOrganizationId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="watcherService" inject="WatcherService@tesserabx-pm";
+    property name="auth"           inject="AuthenticationService@cbauth";
+
+    data = {
+        "watchableType"  : "",
+        "watchableId"    : "",
+        "organizationId" : "",
+        "newWatcherType" : "agent",
+        "newWatcherId"   : "",
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.watchableType  = arguments.params.watchableType  ?: "";
+        data.watchableId    = arguments.params.watchableId    ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+    }
+
+    function watchers(){
+        if ( !len( data.watchableType ) || !len( data.watchableId ) ) return [];
+        return watcherService.listForWatchable( data.watchableType, data.watchableId );
+    }
+
+    function viewer(){
+        return { accountType : "agent", accountId : currentAgentId() };
+    }
+
+    function isWatching(){
+        var me = viewer();
+        if ( !len( me.accountId ) ) return false;
+        return watcherService.isWatching( data.watchableType, data.watchableId, me.accountType, me.accountId );
+    }
+
+    function toggleSelf(){
+        var me = viewer();
+        if ( !len( me.accountId ) ) {
+            notice( "Sign in to watch this.", "warning" );
+            return;
+        }
+        try {
+            var added = watcherService.toggle(
+                data.watchableType,
+                data.watchableId,
+                data.organizationId,
+                me.accountType,
+                me.accountId
+            );
+            notice( added ? "Now watching." : "Stopped watching.", "success" );
+        } catch ( any e ) {
+            notice( "Could not change watch state: " & e.message, "danger" );
+        }
+    }
+
+    /**
+     * Add a watcher of any type by id. UUID-paste pattern matches
+     * the rest of PM's agent/contact picker surface (the picker
+     * dropdowns land alongside the host's account-search service
+     * exposing a public listing API).
+     */
+    function addWatcher(){
+        var wType = trim( data.newWatcherType ?: "" );
+        var wId   = trim( data.newWatcherId   ?: "" );
+        if ( !len( wId ) ) {
+            notice( "Paste the agent or contact id to watch this.", "warning" );
+            return;
+        }
+        try {
+            watcherService.watch(
+                data.watchableType,
+                data.watchableId,
+                data.organizationId,
+                wType,
+                wId
+            );
+            data.newWatcherId = "";
+            notice( "Watcher added.", "success" );
+        } catch ( any e ) {
+            notice( "Could not add watcher: " & e.message, "danger" );
+        }
+    }
+
+    function unwatch( watcherType, watcherId ){
+        try {
+            watcherService.unwatch(
+                data.watchableType,
+                data.watchableId,
+                arguments.watcherType ?: "",
+                arguments.watcherId   ?: ""
+            );
+            notice( "Watcher removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove watcher: " & e.message, "danger" );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

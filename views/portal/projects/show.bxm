@@ -1,0 +1,55 @@
+<bx:output>
+<bx:set local.p = prc.project >
+
+<div class="container py-3">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/pm/projects" class="link-secondary">Projects</a></li>
+            <li class="breadcrumb-item active" aria-current="page">#encodeForHTML( local.p.getName() )#</li>
+        </ol>
+    </nav>
+
+    <h1 class="mb-2 fs-3">#encodeForHTML( local.p.getName() )#</h1>
+    <bx:if len( local.p.getDescription() ?: "" )>
+        <p class="text-body-secondary mb-3">#encodeForHTML( local.p.getDescription() )#</p>
+    </bx:if>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>Tasks</strong>
+            <span class="badge text-bg-secondary">#arrayLen( prc.tasks ?: [] )#</span>
+        </div>
+        <div class="card-body p-0">
+            <bx:if !arrayLen( prc.tasks ?: [] )>
+                <p class="text-body-secondary fst-italic m-3">No tasks are shared with you in this project yet.</p>
+            <bx:else>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr>
+                            <th>Title</th>
+                            <th>Priority</th>
+                            <th>Due</th>
+                            <th>Status</th>
+                        </tr></thead>
+                        <tbody>
+                            <bx:loop array="#prc.tasks#" item="t">
+                                <tr>
+                                    <td>
+                                        <a href="/pm/tasks/#encodeForURL( t.getId() )#" class="text-decoration-none">#encodeForHTML( t.getTitle() )#</a>
+                                        <bx:if len( toString( t.getCompletedAt() ?: "" ) )>
+                                            <span class="badge text-bg-success ms-2"><i class="bi bi-check-circle"></i> completed</span>
+                                        </bx:if>
+                                    </td>
+                                    <td><span class="badge text-bg-light border">#encodeForHTML( t.getPriority() )#</span></td>
+                                    <td class="small">#toString( t.getDueDate() ?: "" )#</td>
+                                    <td class="small"><code class="text-body-secondary">#encodeForHTML( left( t.getStatusId() ?: "", 8 ) )#…</code></td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            </bx:if>
+        </div>
+    </div>
+</div>
+</bx:output>

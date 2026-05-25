@@ -261,6 +261,33 @@ class {
         relocate( uri = "/agent/pm/tasks/" & ( rc.id ?: "" ) );
     }
 
+    /**
+     * Phase 11: agent-side quick toggle for is_client_visible on
+     * the task show page. The edit form already covers this; the
+     * one-click path is the BUILD-PLAN's "Make visible to client"
+     * surface and saves a round-trip through edit/save when an
+     * agent decides to share a task with the client portal.
+     */
+    function toggleClientVisible( event, rc, prc ){
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        try {
+            taskService.updateTask( task.getId(), {
+                isClientVisible : !task.getIsClientVisible(),
+                actorType       : prc.viewer.accountType ?: "agent",
+                actorId         : prc.viewer.accountId   ?: ""
+            } );
+            messagebox.info( task.getIsClientVisible() ? "Task is now visible to clients." : "Task is now hidden from clients." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/pm/tasks/" & task.getId() );
+    }
+
     // ---------- internals ----------
 
     private struct function currentViewer(){

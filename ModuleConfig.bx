@@ -135,13 +135,26 @@ class {
                 // claims match before the host's catch-all.
                 routeClaims : [
                     // Cross-surface landing URLs.
-                    { path : "/pm",                       verbs : "GET", module : "tesserabx-pm", handler : "Main",            action : "index" },
                     { path : "/agent/admin/pm",           verbs : "GET", module : "tesserabx-pm", handler : "Main",            action : "index" },
                     // Phase 7: admin templates landing. Lives in the
                     // admin surface URL space which sits outside PM's
                     // entryPoint, so it is registered here rather than
                     // in config/Router.bx.
                     { path : "/agent/admin/pm/templates", verbs : "GET", module : "tesserabx-pm", handler : "admin.Templates", action : "index" },
+
+                    // Phase 11: client portal surface at /pm. The
+                    // Phase 0 single /pm -> Main.index claim is
+                    // replaced by per-action portal claims so
+                    // contacts get the project list landing, a
+                    // project detail page, and a task detail page
+                    // with a portal-side comment composer. /pm
+                    // proper redirects to /pm/projects in the
+                    // portal Main handler.
+                    { path : "/pm",                  verbs : "GET",  module : "tesserabx-pm", handler : "portal.Main",     action : "index" },
+                    { path : "/pm/projects",         verbs : "GET",  module : "tesserabx-pm", handler : "portal.Projects", action : "index" },
+                    { path : "/pm/projects/:id",     verbs : "GET",  module : "tesserabx-pm", handler : "portal.Projects", action : "show"  },
+                    { path : "/pm/tasks/:id",        verbs : "GET",  module : "tesserabx-pm", handler : "portal.Tasks",    action : "show"  },
+                    { path : "/pm/tasks/:id/comment",verbs : "POST", module : "tesserabx-pm", handler : "portal.Tasks",    action : "postComment" },
 
                     // REST API — Projects.
                     { path : "/api/v1/pm/projects",              verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Projects", action : "index"   },

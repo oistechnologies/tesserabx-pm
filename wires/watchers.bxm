@@ -1,0 +1,67 @@
+<bx:output>
+<bx:script>
+    local.rows    = watchers();
+    local.me      = viewer();
+    local.amWatch = isWatching();
+</bx:script>
+
+<div class="card" data-pm-wire-id="#_getID()#">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h6 mb-0 text-body-secondary"><i class="bi bi-eye"></i> Watchers <span class="badge text-bg-secondary ms-1">#arrayLen( local.rows )#</span></h2>
+            <button type="button"
+                    class="btn btn-sm <bx:if local.amWatch>btn-primary<bx:else>btn-outline-primary</bx:if>"
+                    wire:click="toggleSelf()">
+                <bx:if local.amWatch>
+                    <i class="bi bi-eye-slash"></i> Unwatch
+                <bx:else>
+                    <i class="bi bi-eye"></i> Watch
+                </bx:if>
+            </button>
+        </div>
+
+        <bx:if len( notice )>
+            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-2 py-1 small" role="alert">
+                <span>#encodeForHTML( notice )#</span>
+                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+            </div>
+        </bx:if>
+
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-secondary small fst-italic mb-2">No watchers yet.</p>
+        <bx:else>
+            <ul class="list-unstyled mb-2">
+                <bx:loop array="#local.rows#" item="w">
+                    <li class="d-flex justify-content-between align-items-center small py-1">
+                        <span>
+                            <bx:if w.getWatcherType() eq "agent"><i class="bi bi-person-badge"></i><bx:else><i class="bi bi-person"></i></bx:if>
+                            #encodeForHTML( w.getWatcherType() )#
+                            <code class="ms-1 text-body-secondary">#encodeForHTML( left( w.getWatcherId(), 8 ) )#…</code>
+                            <bx:if w.getWatcherType() eq local.me.accountType and w.getWatcherId() eq local.me.accountId>
+                                <span class="badge text-bg-light border ms-1">you</span>
+                            </bx:if>
+                        </span>
+                        <button type="button" class="btn btn-link btn-sm text-danger p-0"
+                                wire:click="unwatch('#encodeForHTMLAttribute( w.getWatcherType() )#', '#encodeForHTMLAttribute( w.getWatcherId() )#')"
+                                wire:confirm="Remove this watcher? They will stop receiving notifications for this item.">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+
+        <form wire:submit.prevent="addWatcher" class="border-top pt-2 mt-2">
+            <label class="form-label small text-body-secondary mb-1">Add a watcher</label>
+            <div class="d-flex gap-1">
+                <select class="form-select form-select-sm" wire:model="newWatcherType" style="max-width: 6.5rem;">
+                    <option value="agent">agent</option>
+                    <option value="contact">contact</option>
+                </select>
+                <input type="text" class="form-control form-control-sm font-monospace" wire:model="newWatcherId" placeholder="UUID" maxlength="36">
+                <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg"></i></button>
+            </div>
+        </form>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,26 @@
+/**
+ * portal:Main handler. Lands /pm and redirects on to the project
+ * list (or to /login when the request is anonymous).
+ */
+class {
+
+    property name="auth" inject="AuthenticationService@cbauth";
+
+    function index( event, rc, prc ){
+        if ( !isAuthenticated() ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        relocate( uri = "/pm/projects" );
+    }
+
+    private boolean function isAuthenticated(){
+        try {
+            var u = auth.getUser();
+            return !isNull( u );
+        } catch ( any e ) {
+            return false;
+        }
+    }
+
+}

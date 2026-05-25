@@ -136,15 +136,22 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 // (entryPoint='agent/pm') and is NOT a route claim.
                 // The two cross-surface URLs that PM's own router
                 // cannot reach (portal + admin) ARE route claims.
+                // Phase 11 retargeted the portal /pm claim from the
+                // shared Main handler to a dedicated portal.Main
+                // handler that redirects on to /pm/projects.
                 expect( variables.routeClaims.findByPath( "/pm"             ) ).notToBeNull();
                 expect( variables.routeClaims.findByPath( "/agent/admin/pm" ) ).notToBeNull();
                 expect( variables.routeClaims.findByPath( "/agent/pm"       ) ).toBeNull();
-                for ( var path in [ "/pm", "/agent/admin/pm" ] ) {
-                    var claim = variables.routeClaims.findByPath( path );
-                    expect( claim.module  ).toBe( "tesserabx-pm" );
-                    expect( claim.handler ).toBe( "Main" );
-                    expect( claim.action  ).toBe( "index" );
-                }
+
+                var adminClaim = variables.routeClaims.findByPath( "/agent/admin/pm" );
+                expect( adminClaim.module  ).toBe( "tesserabx-pm" );
+                expect( adminClaim.handler ).toBe( "Main" );
+                expect( adminClaim.action  ).toBe( "index" );
+
+                var portalClaim = variables.routeClaims.findByPath( "/pm" );
+                expect( portalClaim.module  ).toBe( "tesserabx-pm" );
+                expect( portalClaim.handler ).toBe( "portal.Main" );
+                expect( portalClaim.action  ).toBe( "index" );
             } );
 
             // ---- Phase 2a: project CRUD service wiring.
@@ -486,6 +493,30 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( entry.route   ).toBe( "/agent/pm/my-tasks" );
                 expect( entry.surface ).toBe( "agent" );
                 expect( entry.requiredPermission ).toBe( "pm.view" );
+            } );
+
+            // ---- Phase 11: client portal surface.
+
+            it( "claims the portal /pm landing + the project / task detail routes", function(){
+                expect( variables.routeClaims.findByPath( "/pm"              ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/pm/projects"     ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/pm/projects/:id" ) ).notToBeNull();
+                expect( variables.routeClaims.findByPath( "/pm/tasks/:id"    ) ).notToBeNull();
+            } );
+
+            it( "claims the POST /pm/tasks/:id/comment route for the portal composer", function(){
+                var claim = variables.routeClaims.findByPath( "/pm/tasks/:id/comment" );
+                expect( claim ).notToBeNull();
+                expect( claim.handler ).toBe( "portal.Tasks" );
+                expect( claim.action  ).toBe( "postComment" );
+            } );
+
+            it( "portal landing routes to portal.Main.index", function(){
+                var claim = variables.routeClaims.findByPath( "/pm" );
+                expect( claim ).notToBeNull();
+                expect( claim.module  ).toBe( "tesserabx-pm" );
+                expect( claim.handler ).toBe( "portal.Main" );
+                expect( claim.action  ).toBe( "index" );
             } );
 
             // Phase 2+ probes are appended below as registries are

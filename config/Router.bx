@@ -61,6 +61,7 @@ class {
 
         route( "tasks/:id/delete"   ).withVerbs( "POST" ).to( "Tasks.remove" );
         route( "tasks/:id/restore"  ).withVerbs( "POST" ).to( "Tasks.restore" );
+        route( "tasks/:id/toggle-client-visible" ).withVerbs( "POST" ).to( "Tasks.toggleClientVisible" );
         route( "tasks/:id/edit"     ).to( "Tasks.edit" );
         route( "tasks/:id/subtasks/new" ).withHandler( "Subtasks" ).toAction( {
             "GET"  : "new",

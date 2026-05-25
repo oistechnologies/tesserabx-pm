@@ -1,0 +1,70 @@
+<bx:output>
+<bx:set local.t = prc.task >
+<bx:set local.me = prc.viewer >
+
+<div class="container py-3">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/pm/projects" class="link-secondary">Projects</a></li>
+            <li class="breadcrumb-item"><a href="/pm/projects/#encodeForURL( local.t.getProjectId() )#" class="link-secondary">Project</a></li>
+            <li class="breadcrumb-item active" aria-current="page">#encodeForHTML( local.t.getTitle() )#</li>
+        </ol>
+    </nav>
+
+    <h1 class="mb-2 fs-3">#encodeForHTML( local.t.getTitle() )#</h1>
+    <div class="d-flex gap-2 align-items-center text-body-secondary small mb-3">
+        <span class="badge text-bg-light border">#encodeForHTML( local.t.getPriority() )#</span>
+        <bx:if len( toString( local.t.getDueDate() ?: "" ) )>
+            <span><i class="bi bi-calendar"></i> due #toString( local.t.getDueDate() )#</span>
+        </bx:if>
+        <bx:if len( toString( local.t.getCompletedAt() ?: "" ) )>
+            <span class="badge text-bg-success ms-1"><i class="bi bi-check-circle"></i> completed</span>
+        </bx:if>
+    </div>
+
+    <bx:if len( local.t.getDescription() ?: "" )>
+        <div class="card mb-3"><div class="card-body">
+            <h2 class="h5 mb-2">Description</h2>
+            <p class="mb-0" style="white-space: pre-wrap;">#encodeForHTML( local.t.getDescription() )#</p>
+        </div></div>
+    </bx:if>
+
+    <bx:set local.flash = getInstance( "messagebox@cbmessagebox" ) >
+    <bx:if !local.flash.isEmptyMessage()>
+        <!--- cbmessagebox.renderIt() emits its own bootstrap-alert HTML --->
+        <!--- and clears the flash; the wrapper alert div is unneeded. --->
+        #local.flash.renderIt()#
+    </bx:if>
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Comments</strong> <span class="badge text-bg-secondary">#arrayLen( prc.comments ?: [] )#</span></div>
+        <div class="card-body">
+            <bx:if !arrayLen( prc.comments ?: [] )>
+                <p class="text-body-secondary small fst-italic mb-3">No comments yet.</p>
+            <bx:else>
+                <ul class="list-unstyled mb-3">
+                    <bx:loop array="#prc.comments#" item="c">
+                        <li class="border-top pt-2 pb-2">
+                            <div class="small text-body-secondary">
+                                <bx:if c.getAuthorType() eq "agent"><i class="bi bi-person-badge"></i><bx:else><i class="bi bi-person"></i></bx:if>
+                                #encodeForHTML( c.getAuthorType() )#
+                                <span class="ms-2">#toString( c.getCreatedAt() )#</span>
+                            </div>
+                            <div class="small" style="white-space: pre-wrap;">#encodeForHTML( c.getBody() )#</div>
+                        </li>
+                    </bx:loop>
+                </ul>
+            </bx:if>
+
+            <form method="post" action="/pm/tasks/#encodeForURL( local.t.getId() )#/comment">
+                <div class="mb-2">
+                    <textarea class="form-control" name="body" rows="3" maxlength="20000" placeholder="Add a comment..."></textarea>
+                </div>
+                <div class="text-end">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> Post</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+</bx:output>

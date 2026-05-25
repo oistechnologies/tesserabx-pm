@@ -95,7 +95,16 @@
         </div>
 
         <div class="col-12 col-lg-4">
-            <div class="card">
+            #wire(
+                name   = "Watchers@tesserabx-pm",
+                params = {
+                    watchableType  : "subtask",
+                    watchableId    : local.s.getId(),
+                    organizationId : local.s.getOrganizationId()
+                }
+            )#
+
+            <div class="card mt-3">
                 <div class="card-body">
                     <h2 class="h6 mb-3">Details</h2>
                     <dl class="row mb-0 small">

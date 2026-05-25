@@ -6,6 +6,21 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 11: Client Portal Integration
+
+- Client-facing PM surface mounted at `/pm` (portal). Three new handlers under `handlers/portal/`:
+  - `portal.Main.index` lands `/pm` and redirects to `/pm/projects` (or `/login` when anonymous).
+  - `portal.Projects.index` / `.show` render the contact's project list and a per-project task list, both scoped through `VisibilityService` (Option C is enforced on every read).
+  - `portal.Tasks.show` / `.postComment` render task detail + persist contact-authored comments. The composer routes through the same `CommentService.createComment` Phase 4a guarded, so `is_internal=false` is enforced at the service layer regardless of what the form posts.
+- Portal-side views: `views/portal/projects/index.bxm`, `projects/show.bxm`, `tasks/show.bxm`. All use the host's Portal layout (`event.setLayout(name="Portal", module="core")`) and the host's auth (`auth.getUser()`) so a non-contact session is redirected to `/login`.
+- "Make visible to client" quick toggle: new `Tasks.toggleClientVisible` action + route + button on the agent task show page that flips `is_client_visible` in one click (the edit form already covered it; this is the BUILD-PLAN's expected per-task UX). Eye / eye-slash icon swap based on current state.
+- Manifest `routeClaims` replaced the Phase 0 single `/pm -> Main.index` claim with five portal-specific claims so each surface gets its own handler.action: `/pm`, `/pm/projects`, `/pm/projects/:id`, `/pm/tasks/:id`, and `POST /pm/tasks/:id/comment`.
+- `InstallSpec` updates: the legacy `/pm -> Main` probe rewritten to assert the new `portal.Main` target; 3 new probes for the per-action portal claims (landing + project/task detail + comment POST). 75 specs total in InstallSpec.
+- Notification email branding: Phase 9a already declared contact-recipient templates for every PM event, and the host's portal-side template renderer brands them with the portal's mail header / footer; no Phase 11 template changes were needed beyond confirming the contact-side templates exist (they do).
+- Contact permission gating per BUILD-PLAN §3.4: contacts without `pm.edit` reach `/pm/tasks/:id` but cannot post mutations through PM's own routes (no contact-facing forms exist for title / status / assignment changes). The `pm-client-contributor` role carries `pm.edit` for when the client portal eventually exposes those flows; the Phase 11 surface is read + comment only.
+- New `Watchers@tesserabx-pm` CBWire embedded on the agent task and subtask show pages. Lists current watchers (with a "you" badge on your own row) and exposes a one-click Watch / Unwatch button for the current viewer plus a per-row remove for any watcher. Routes through `WatcherService.toggle / unwatch / listForWatchable`. Until now watchers were only added implicitly via the assignment + comment auto-hooks; this is the explicit subscription path. Polymorphic over task + subtask via the wire's `watchableType` param.
+- Deferred: a portal-side Watch toggle (the polymorphic WatcherService already supports contact watchers; the contact-facing surface lands alongside other portal follow-ups); inline KB / help-doc cross-links on the portal task detail (lands with Phase 13 help wiring).
+
 ### Phase 10b: My Tasks (cross-project) + SavedFilter
 
 - New `pm_saved_filters` table with polymorphic owner (`user_type` + `user_id`) so both account families can persist named filter sets. `view` enum-style column (`board` | `list` | `calendar` | `my-tasks`) plus a nullable `project_id` lets cross-project views (my-tasks) save filters with NULL project while per-project views scope by id. `filters_json` is TEXT carrying the wire's filter struct; `is_default` flips one filter per (user, view, project) tuple into auto-apply.
