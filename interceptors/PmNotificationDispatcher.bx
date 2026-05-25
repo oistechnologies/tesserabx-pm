@@ -1,0 +1,262 @@
+/**
+ * PmNotificationDispatcher: translates PM lifecycle announces into
+ * NotificationsService.dispatchForEvent calls so the host notifications
+ * module can fan out across registered channels per the templates PM
+ * declares in its manifest.
+ *
+ * Hooks (matches Phase 4b's PM event catalog):
+ *   onPmTaskAssigned       -> the assignee (agent or contact)
+ *   onPmCommentAdded       -> every watcher except the comment author
+ *   onPmMentioned          -> the mentioned user
+ *   onPmTaskCompleted      -> every watcher except the actor
+ *   onPmTaskStatusChanged  -> every watcher except the actor
+ *
+ * Per-listener try/catch keeps a fan-out miss from breaking the
+ * originating PM write. Lazy service lookup matches the Phase 4b
+ * ProjectEventLogger pattern (ColdBox instantiates module
+ * interceptors before per-module bindings register).
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onPmTaskAssigned( event, interceptData, rc, prc ){
+        try {
+            var e = arguments.interceptData;
+            var taskId = e.entity.id ?: "";
+            var meta   = e.metadata    ?: {};
+            var assigneeType = meta.assigneeType ?: "";
+            var assigneeId   = meta.assigneeId   ?: "";
+            if ( !len( taskId ) || !len( assigneeType ) || !len( assigneeId ) ) return;
+
+            var task = loadTaskRow( taskId );
+            if ( !task.recordCount ) return;
+
+            // Avoid self-notifying when an agent assigns themselves
+            // (common; the agent already knows). Cross-family
+            // assignments (agent assigning a contact) always notify.
+            if ( assigneeType == ( e.actorType ?: "" ) && assigneeId == ( e.actorId ?: "" ) ) return;
+
+            notifications().dispatchForEvent(
+                eventKey   : "tesserabx-pm.task_assigned",
+                recipients : [ { "type" : assigneeType, "id" : assigneeId } ],
+                context    : taskContext( task, e )
+            );
+        } catch ( any e ) {
+            log( "onPmTaskAssigned", e.message );
+        }
+    }
+
+    function onPmCommentAdded( event, interceptData, rc, prc ){
+        try {
+            var e        = arguments.interceptData;
+            var meta     = e.metadata ?: {};
+            var ctype    = meta.commentable_type ?: "";
+            var cid      = meta.commentable_id   ?: "";
+            if ( !len( ctype ) || !len( cid ) ) return;
+
+            var recipients = watchersExcept( ctype, cid, e.actorType ?: "", e.actorId ?: "" );
+            if ( !arrayLen( recipients ) ) return;
+
+            var ctx = baseActorContext( e );
+            ctx.commentableType = ctype;
+            ctx.commentableId   = cid;
+            ctx.taskId          = ( ctype == "task"    ? cid : "" );
+            ctx.subtaskId       = ( ctype == "subtask" ? cid : "" );
+            ctx.projectId       = ( ctype == "project" ? cid : "" );
+
+            // Enrich with a task title when the comment lives on a
+            // task (most common case) so the body template can read
+            // it; subtask / project commentables fall back to ids.
+            if ( ctype == "task" ) {
+                var taskRow = loadTaskRow( cid );
+                if ( taskRow.recordCount ) ctx.append( taskMetaContext( taskRow ) );
+            }
+
+            notifications().dispatchForEvent(
+                eventKey   : "tesserabx-pm.comment_added",
+                recipients : recipients,
+                context    : ctx
+            );
+        } catch ( any e ) {
+            log( "onPmCommentAdded", e.message );
+        }
+    }
+
+    function onPmMentioned( event, interceptData, rc, prc ){
+        try {
+            var e    = arguments.interceptData;
+            var meta = e.metadata ?: {};
+            var mType = meta.mentioned_type ?: "";
+            var mId   = meta.mentioned_id   ?: "";
+            if ( !len( mType ) || !len( mId ) ) return;
+
+            var ctx = baseActorContext( e );
+            ctx.commentId       = ( e.entity.id ?: "" );
+            ctx.commentableType = meta.commentable_type ?: "";
+            ctx.commentableId   = meta.commentable_id   ?: "";
+            ctx.taskId          = ( ctx.commentableType == "task"    ? ctx.commentableId : "" );
+            ctx.subtaskId       = ( ctx.commentableType == "subtask" ? ctx.commentableId : "" );
+
+            if ( ctx.commentableType == "task" && len( ctx.commentableId ) ) {
+                var taskRow = loadTaskRow( ctx.commentableId );
+                if ( taskRow.recordCount ) ctx.append( taskMetaContext( taskRow ) );
+            }
+
+            notifications().dispatchForEvent(
+                eventKey   : "tesserabx-pm.mentioned",
+                recipients : [ { "type" : mType, "id" : mId } ],
+                context    : ctx
+            );
+        } catch ( any e ) {
+            log( "onPmMentioned", e.message );
+        }
+    }
+
+    function onPmTaskCompleted(     event, interceptData, rc, prc ){ taskWatcherDispatch( "tesserabx-pm.task_completed",      arguments.interceptData ); }
+    function onPmTaskStatusChanged( event, interceptData, rc, prc ){ taskWatcherDispatch( "tesserabx-pm.task_status_changed", arguments.interceptData ); }
+
+    // ---------- internals ----------
+
+    private void function taskWatcherDispatch( required string eventKey, required struct envelope ){
+        try {
+            var e = arguments.envelope;
+            var taskId = e.entity.id ?: "";
+            if ( !len( taskId ) ) return;
+
+            var recipients = watchersExcept( "task", taskId, e.actorType ?: "", e.actorId ?: "" );
+            if ( !arrayLen( recipients ) ) return;
+
+            var task = loadTaskRow( taskId );
+            if ( !task.recordCount ) return;
+
+            notifications().dispatchForEvent(
+                eventKey   : arguments.eventKey,
+                recipients : recipients,
+                context    : taskContext( task, e )
+            );
+        } catch ( any e ) {
+            log( "taskWatcherDispatch[" & arguments.eventKey & "]", e.message );
+        }
+    }
+
+    /**
+     * Resolve the watchers of a (watchableType, watchableId) and
+     * subtract the actor so the agent who triggered the change does
+     * not self-notify. Returns the `[ { type, id } ]` shape the
+     * notifications dispatcher expects.
+     */
+    private array function watchersExcept(
+        required string watchableType,
+        required string watchableId,
+        required string actorType,
+        required string actorId
+    ){
+        var out = [];
+        try {
+            var watcherSvc = wirebox.getInstance( "WatcherService@tesserabx-pm" );
+            var rows       = watcherSvc.listForWatchable( arguments.watchableType, arguments.watchableId );
+            for ( var w in rows ) {
+                if ( w.getWatcherType() == arguments.actorType
+                  && w.getWatcherId()   == arguments.actorId  ) continue;
+                out.append( { "type" : w.getWatcherType(), "id" : w.getWatcherId() } );
+            }
+        } catch ( any e ) {
+            // Watcher lookups should never break the dispatch path.
+        }
+        return out;
+    }
+
+    /**
+     * Build the context struct for a task-centric event. Pulls the
+     * project name once so the template can reference it without
+     * the dispatcher (or the channel) re-querying.
+     */
+    private struct function taskContext( required query taskRow, required struct envelope ){
+        var ctx = baseActorContext( arguments.envelope );
+        ctx.append( taskMetaContext( arguments.taskRow ) );
+        return ctx;
+    }
+
+    private struct function taskMetaContext( required query taskRow ){
+        var ctx = {
+            taskId      : arguments.taskRow.id[ 1 ],
+            taskTitle   : arguments.taskRow.title[ 1 ],
+            projectId   : arguments.taskRow.project_id[ 1 ],
+            projectName : arguments.taskRow.project_name[ 1 ] ?: "",
+            dueDate     : isDate( arguments.taskRow.due_date[ 1 ] ) ? dateFormat( arguments.taskRow.due_date[ 1 ], "yyyy-mm-dd" ) : "",
+            priority    : arguments.taskRow.priority[ 1 ] ?: ""
+        };
+        return ctx;
+    }
+
+    private struct function baseActorContext( required struct envelope ){
+        var aType = arguments.envelope.actorType ?: "system";
+        var aId   = arguments.envelope.actorId   ?: "";
+        return {
+            actorType  : aType,
+            actorId    : aId,
+            actorLabel : actorLabel( aType, aId )
+        };
+    }
+
+    /**
+     * Best-effort actor name resolution. The notifications module
+     * does this for tickets via the host's contact / agent services;
+     * we duplicate just enough to keep template prose readable.
+     * Falls back to a truncated id badge when the lookup fails.
+     */
+    private string function actorLabel( required string actorType, required string actorId ){
+        if ( !len( arguments.actorId ) || arguments.actorType == "system" ) return "System";
+        try {
+            if ( arguments.actorType == "agent" ) {
+                var r = queryExecute(
+                    "SELECT COALESCE( NULLIF( TRIM( CONCAT( first_name, ' ', last_name ) ), '' ), email ) AS label
+                     FROM   agents WHERE id = :id",
+                    { id : arguments.actorId }
+                );
+                if ( r.recordCount && len( r.label[ 1 ] ?: "" ) ) return r.label[ 1 ];
+            } else if ( arguments.actorType == "contact" ) {
+                var r2 = queryExecute(
+                    "SELECT COALESCE( NULLIF( TRIM( CONCAT( first_name, ' ', last_name ) ), '' ), email ) AS label
+                     FROM   contacts WHERE id = :id",
+                    { id : arguments.actorId }
+                );
+                if ( r2.recordCount && len( r2.label[ 1 ] ?: "" ) ) return r2.label[ 1 ];
+            }
+        } catch ( any e ) {}
+        return arguments.actorType & " " & left( arguments.actorId, 8 );
+    }
+
+    /**
+     * Load the task + its parent project name in one query so the
+     * template context can be built without a second roundtrip.
+     */
+    private query function loadTaskRow( required string taskId ){
+        return queryExecute(
+            "SELECT t.id, t.title, t.project_id, t.due_date, t.priority, p.name AS project_name
+             FROM   pm_tasks    t
+             LEFT JOIN pm_projects p ON p.id = t.project_id
+             WHERE  t.id = :id",
+            { id : arguments.taskId }
+        );
+    }
+
+    private any function notifications(){
+        if ( !structKeyExists( variables, "_ns" ) ) {
+            variables._ns = wirebox.getInstance( "NotificationsService@notifications" );
+        }
+        return variables._ns;
+    }
+
+    private void function log( required string source, required string message ){
+        writeLog(
+            text : "PmNotificationDispatcher." & arguments.source & " failed: " & arguments.message,
+            log  : "tesserabx",
+            type : "warning"
+        );
+    }
+
+}

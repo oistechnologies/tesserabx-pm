@@ -19,7 +19,9 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
+    property name="wirebox"             inject="wirebox";
+    property name="interceptorService"  inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
 
     variables.VALID_TYPES = [ "agent", "contact" ];
     // Captures `@agent:<token>` or `@contact:<token>` where token
@@ -53,8 +55,67 @@ class singleton=true {
             row.setMentionedUserId(   m.id );
             row.save();
             out.append( m );
+            announceMention(
+                mentionId      : row.getId(),
+                commentId      : arguments.commentId,
+                organizationId : arguments.organizationId,
+                mentionedType  : m.type,
+                mentionedId    : m.id
+            );
         }
         return out;
+    }
+
+    /**
+     * Best-effort sync announce so the Phase 9a PmNotificationDispatcher
+     * can fan out to the mentioned user. Failure here must not break
+     * the comment write path.
+     */
+    private void function announceMention(
+        required string mentionId,
+        required string commentId,
+        required string organizationId,
+        required string mentionedType,
+        required string mentionedId
+    ){
+        try {
+            // Best-effort lookup of the originating comment to seed
+            // the commentable + author metadata the dispatcher needs.
+            var c = queryExecute(
+                "SELECT author_type, author_id, commentable_type, commentable_id
+                 FROM   pm_comments WHERE id = :id",
+                { id : arguments.commentId }
+            );
+            var actorType  = c.recordCount ? ( c.author_type[ 1 ] ?: "system" ) : "system";
+            var actorId    = c.recordCount ? ( c.author_id[ 1 ]   ?: ""       ) : "";
+            var ctype      = c.recordCount ? ( c.commentable_type[ 1 ] ?: "" ) : "";
+            var cid        = c.recordCount ? ( c.commentable_id[ 1 ]   ?: "" ) : "";
+
+            interceptorService.announce(
+                "onPmMentioned",
+                eventPayloadBuilder.build(
+                    event          : "onPmMentioned",
+                    organizationId : arguments.organizationId,
+                    actorType      : actorType,
+                    actorId        : actorId,
+                    entity         : { type : "Mention", id : arguments.mentionId },
+                    metadata       : {
+                        comment_id       : arguments.commentId,
+                        mentioned_type   : arguments.mentionedType,
+                        mentioned_id     : arguments.mentionedId,
+                        commentable_type : ctype,
+                        commentable_id   : cid
+                    }
+                ),
+                false
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "MentionService.announceMention failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
     }
 
     /**

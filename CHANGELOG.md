@@ -6,6 +6,21 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 9a: Notification Dispatch and Templates
+
+- `PmNotificationDispatcher` interceptor translates PM lifecycle envelopes into `NotificationsService.dispatchForEvent` calls. Listeners:
+  - `onPmTaskAssigned` → the assignee (skipping self-assignment so the agent who assigns themselves does not self-notify).
+  - `onPmCommentAdded` → every watcher of the commentable minus the comment author. Comment events on a task surface the task's title in the template context; project / subtask commentables fall back to ids.
+  - `onPmMentioned` → the mentioned user (one notification per `(comment, mentioned user)` tuple).
+  - `onPmTaskCompleted` and `onPmTaskStatusChanged` → every watcher of the task minus the actor who triggered the change.
+- `MentionService.recordMentions` now announces `onPmMentioned` per parsed mention (sync, best-effort) so the dispatcher can fan out to the mentioned user. Envelope carries `metadata.mentioned_type`, `mentioned_id`, `commentable_type`, `commentable_id`, and `comment_id` for downstream listeners.
+- `notificationTemplates` manifest declares 15 entries covering every `(event, channel, recipientType)` tuple Phase 9a owns: `task_assigned`, `comment_added`, and `mentioned` each get inapp + email × agent + contact (4 entries each = 12); `task_completed` gets inapp + email × agent (2 entries); `task_status_changed` gets inapp × agent only to keep email noise down (1 entry). All templates use the host's `{{key}}` substitution syntax (the renderer is a simple key-replace loop; no conditional helpers) so a sparse context renders cleanly without leaving template syntax in the body. Admins override via the `notification_templates` DB table at runtime.
+- New webhook event key `tesserabx-pm.mentioned` declared in `webhookEvents` so external webhook subscribers can react to PM mentions; matches the new `onPmMentioned` interception point already declared in Phase 4b.
+- Actor name resolution: the dispatcher resolves `actorLabel` from `agents` / `contacts` (full name when present, email when not, type+truncated id when the lookup fails) so the templates read like prose rather than UUID badges.
+- `contributesTo` extended with `notificationTemplates`. Manifest interceptor list adds `PmNotificationDispatcher`.
+- `InstallSpec` adds 2 new probes: the `tesserabx-pm.mentioned` webhook event registration and a per-tuple probe asserting every Phase 9a notification template lands in `NotificationTemplateRegistry@notifications`. 57 specs total in InstallSpec.
+- Deferred to Phase 9b: scheduled tasks for `onPmTaskDueSoon` and `onPmTaskOverdue` plus matching templates. The dispatcher already follows the watcher-fan-out pattern those events will use, so the deferred work is the scheduler config + the event announces + the two new template tuples.
+
 ### Phase 8b: Bidirectional Ticket Integration (Automation + Lifecycle + SLA)
 
 - `CreateTaskFromTicketExecutor@tesserabx-pm` registered through `automationActions` as `tesserabx-pm.createTaskFromTicket`. Implements the `execute( action, ticket, rule )` signature `ActionRegistry@automation` actually calls (note: the example-sync sample addon uses `dispatch`, which the live registry ignores). Creates a PM task seeded from the ticket subject + description, maps ticket priority to PM priority, then immediately links the new task back to the ticket with a `fixes` relation. Rule-editor parameter schema is a single `value` text field today (the dropdown rich type lands when the host's parameterSchema renderer supports dynamic option providers; per the storage note in `EXTENSIONS.md` rules persist a single `{ type, value }` shape).

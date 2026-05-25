@@ -418,6 +418,31 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.ticket_unlinked" ) ).toBeTrue();
             } );
 
+            // ---- Phase 9a: notification dispatch + templates.
+
+            it( "registers the tesserabx-pm.mentioned webhookEvent", function(){
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.mentioned" ) ).toBeTrue();
+            } );
+
+            it( "registers notificationTemplates for every PM lifecycle event", function(){
+                var registry = variables.wb.getInstance( "NotificationTemplateRegistry@notifications" );
+                expect( registry.findTemplate( "tesserabx-pm.task_assigned",        "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_assigned",        "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_assigned",        "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_assigned",        "email", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.comment_added",        "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.comment_added",        "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.comment_added",        "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.comment_added",        "email", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.mentioned",            "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.mentioned",            "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.mentioned",            "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.mentioned",            "email", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_completed",       "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_completed",       "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_status_changed",  "inapp", "agent"   ) ).notToBeNull();
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

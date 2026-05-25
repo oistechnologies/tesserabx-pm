@@ -59,7 +59,8 @@ class {
                     "adminPages", "settings", "routeClaims",
                     "apiResources", "webhookEvents", "assets",
                     "auditEvents", "dashboardWidgets",
-                    "ticketPanels", "automationActions"
+                    "ticketPanels", "automationActions",
+                    "notificationTemplates"
                 ],
                 requiresAi     : false,
 
@@ -298,7 +299,10 @@ class {
                     // Phase 8b: bidirectional link lifecycle. Fired
                     // (sync) by TaskTicketService.link / unlink.
                     { key : "tesserabx-pm.ticket_linked",        label : "Ticket linked to a PM task" },
-                    { key : "tesserabx-pm.ticket_unlinked",      label : "Ticket unlinked from a PM task" }
+                    { key : "tesserabx-pm.ticket_unlinked",      label : "Ticket unlinked from a PM task" },
+                    // Phase 9a: mention dispatched as a webhook
+                    // event so external systems can react to @-mentions.
+                    { key : "tesserabx-pm.mentioned",            label : "PM mention" }
                 ],
 
                 // Phase 8a: bidirectional ticket integration. The
@@ -346,10 +350,136 @@ class {
                 ],
                 automationTriggers      : [],
 
-                // Phase 9: notification delivery (PM emits events
-                // that the host notifications module consumes; PM
-                // declares the templates).
-                notificationTemplates   : [],
+                // Phase 9a: notification templates. Keyed on the
+                // (eventKey, channel, recipientType) tuple per
+                // EXTENSIONS.md. PM declares inapp + email defaults
+                // for both account families across every PM lifecycle
+                // event a user cares about; admins override via the
+                // notification_templates DB table at runtime.
+                //
+                // {{appBaseUrl}} and {{unsubscribeUrl}} are injected
+                // by the dispatcher; everything else comes from the
+                // context struct PmNotificationDispatcher builds.
+                // Renderer is a simple {{key}} substitution loop
+                // (no conditional helpers); missing keys render as
+                // an empty string, so each template is written to
+                // read cleanly even with sparse context.
+                notificationTemplates : [
+                    // ----- task assigned -----
+                    {
+                        eventKey : "tesserabx-pm.task_assigned", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{actorLabel}} assigned you {{taskTitle}}",
+                        bodyTemplate  : "Project {{projectName}}. Due {{dueDate}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_assigned", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] {{taskTitle}} assigned to you",
+                        bodyTemplate  : "{{actorLabel}} assigned you the task {{taskTitle}} in project {{projectName}}. Open the task: {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_assigned", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "You have a new task: {{taskTitle}}",
+                        bodyTemplate  : "Project {{projectName}}. Due {{dueDate}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_assigned", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] {{taskTitle}} is on your plate",
+                        bodyTemplate  : "{{actorLabel}} assigned you the task {{taskTitle}} in {{projectName}}. Open it: {{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+
+                    // ----- comment added (watcher fan-out) -----
+                    {
+                        eventKey : "tesserabx-pm.comment_added", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{actorLabel}} commented on {{taskTitle}}",
+                        bodyTemplate  : "Project {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.comment_added", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] New comment on {{taskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} left a comment on {{taskTitle}} (project {{projectName}}). Read it: {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.comment_added", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "{{actorLabel}} commented on {{taskTitle}}",
+                        bodyTemplate  : "Project {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.comment_added", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] New comment on {{taskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} left a comment on {{taskTitle}} (project {{projectName}}). Read it: {{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+
+                    // ----- mentioned -----
+                    {
+                        eventKey : "tesserabx-pm.mentioned", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{actorLabel}} mentioned you",
+                        bodyTemplate  : "On {{taskTitle}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.mentioned", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] {{actorLabel}} mentioned you",
+                        bodyTemplate  : "{{actorLabel}} mentioned you in a PM comment on {{taskTitle}} ({{projectName}}). Read it: {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.mentioned", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "{{actorLabel}} mentioned you",
+                        bodyTemplate  : "On {{taskTitle}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.mentioned", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] {{actorLabel}} mentioned you",
+                        bodyTemplate  : "{{actorLabel}} mentioned you in a PM comment on {{taskTitle}} ({{projectName}}). Read it: {{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+
+                    // ----- task completed (watcher fan-out) -----
+                    {
+                        eventKey : "tesserabx-pm.task_completed", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{taskTitle}} marked complete",
+                        bodyTemplate  : "{{actorLabel}} closed {{taskTitle}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_completed", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] {{taskTitle}} complete",
+                        bodyTemplate  : "{{actorLabel}} marked {{taskTitle}} complete in {{projectName}}. {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+
+                    // ----- task status changed (watcher fan-out, inapp only to keep email noise down) -----
+                    {
+                        eventKey : "tesserabx-pm.task_status_changed", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{taskTitle}} moved",
+                        bodyTemplate  : "{{actorLabel}} updated the status of {{taskTitle}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    }
+                ],
 
                 // Phase 5: agent home dashboard widget. The host's
                 // dashboard renderer calls dataProvider.dataMethod
@@ -433,6 +563,16 @@ class {
             {
                 class      : "#moduleMapping#.interceptors.PmTaskLifecycleListener",
                 name       : "PmTaskLifecycleListener",
+                properties : {}
+            },
+            // Phase 9a: translates PM lifecycle envelopes into
+            // NotificationsService.dispatchForEvent calls. The
+            // dispatcher resolves recipients (assignee / watchers /
+            // mentioned user), builds the template context, and
+            // hands off to the host notifications module.
+            {
+                class      : "#moduleMapping#.interceptors.PmNotificationDispatcher",
+                name       : "PmNotificationDispatcher",
                 properties : {}
             }
         ];
