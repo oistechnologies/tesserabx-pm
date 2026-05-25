@@ -260,7 +260,8 @@ class {
             lifecycleStatus     : arguments.rc.lifecycleStatus           ?: "active",
             startDate           : len( arguments.rc.startDate ?: "" ) ? arguments.rc.startDate : "",
             endDate             : len( arguments.rc.endDate   ?: "" ) ? arguments.rc.endDate   : "",
-            timeTrackingEnabled : truthy( arguments.rc.timeTrackingEnabled ?: false )
+            timeTrackingEnabled : truthy( arguments.rc.timeTrackingEnabled ?: false ),
+            templateSourceId    : arguments.rc.templateSourceId          ?: ""
         };
     }
 

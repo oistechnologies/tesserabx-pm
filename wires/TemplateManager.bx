@@ -1,0 +1,153 @@
+/**
+ * TemplateManager: admin UI for project templates at
+ * /agent/admin/pm/templates. Lists shared + tenant templates, lets
+ * the operator create a template from an existing project, rename
+ * an existing one, and delete.
+ *
+ * "Create from project" is the primary path. The snapshot captures
+ * statuses, labels, custom fields, tasks (with relative date
+ * offsets), and subtasks. Sharing flag exposes a template to every
+ * tenant; only `pm.admin` users see this page (gated by the
+ * adminPages manifest entry).
+ */
+class extends="cbwire.models.Component" {
+
+    property name="templateService" inject="TemplateService@tesserabx-pm";
+    property name="projectService"  inject="ProjectService@tesserabx-pm";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    data = {
+        "newName"        : "",
+        "newDescription" : "",
+        "newIsShared"    : true,
+        "newFromProject" : "",
+        "editingId"      : "",
+        "editName"       : "",
+        "editDescription" : "",
+        "editIsShared"   : false,
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function templates(){
+        return templateService.listTemplates();
+    }
+
+    function projects(){
+        return projectService.listProjects( includeArchived = true );
+    }
+
+    function create(){
+        var name = trim( data.newName ?: "" );
+        if ( !len( name ) ) {
+            notice( "Enter a template name.", "warning" );
+            return;
+        }
+        try {
+            if ( len( data.newFromProject ?: "" ) ) {
+                templateService.createFromProject( {
+                    projectId   : data.newFromProject,
+                    name        : name,
+                    description : trim( data.newDescription ?: "" ),
+                    isShared    : !!data.newIsShared,
+                    actorType   : "agent",
+                    actorId     : currentAgentId()
+                } );
+            } else {
+                templateService.createTemplate( {
+                    name        : name,
+                    description : trim( data.newDescription ?: "" ),
+                    isShared    : !!data.newIsShared,
+                    actorType   : "agent",
+                    actorId     : currentAgentId()
+                } );
+            }
+            data.newName        = "";
+            data.newDescription = "";
+            data.newFromProject = "";
+            notice( "Template created.", "success" );
+        } catch ( any e ) {
+            notice( "Could not create template: " & e.message, "danger" );
+        }
+    }
+
+    function startEdit( id ){
+        var t = templateService.getTemplate( arguments.id ?: "" );
+        if ( isNull( t ) ) return;
+        data.editingId       = t.getId();
+        data.editName        = t.getName();
+        data.editDescription = t.getDescription() ?: "";
+        data.editIsShared    = !!t.getIsShared();
+    }
+
+    function cancelEdit(){
+        data.editingId       = "";
+        data.editName        = "";
+        data.editDescription = "";
+        data.editIsShared    = false;
+    }
+
+    function saveEdit(){
+        if ( !len( data.editingId ?: "" ) ) return;
+        try {
+            templateService.updateTemplate( data.editingId, {
+                name        : trim( data.editName ?: "" ),
+                description : trim( data.editDescription ?: "" ),
+                isShared    : !!data.editIsShared
+            } );
+            cancelEdit();
+            notice( "Template updated.", "success" );
+        } catch ( any e ) {
+            notice( "Could not update template: " & e.message, "danger" );
+        }
+    }
+
+    function remove( id ){
+        try {
+            templateService.removeTemplate( arguments.id ?: "" );
+            notice( "Template removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove template: " & e.message, "danger" );
+        }
+    }
+
+    /**
+     * Template helper: count of tasks / statuses / labels / fields
+     * in the snapshot. Cheap; only invoked at render time.
+     */
+    function summary( required any template ){
+        var raw = arguments.template.getStructureJson() ?: "";
+        var out = { statuses : 0, labels : 0, custom_fields : 0, tasks : 0, subtasks : 0 };
+        if ( !len( raw ) ) return out;
+        try {
+            var s = jsonDeserialize( raw );
+            if ( !isStruct( s ) ) return out;
+            out.statuses      = arrayLen( s.statuses      ?: [] );
+            out.labels        = arrayLen( s.labels        ?: [] );
+            out.custom_fields = arrayLen( s.custom_fields ?: [] );
+            var tasks = s.tasks ?: [];
+            out.tasks         = arrayLen( tasks );
+            var subCount = 0;
+            for ( var t in tasks ) subCount += arrayLen( t.subtasks ?: [] );
+            out.subtasks      = subCount;
+        } catch ( any e ) {}
+        return out;
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

@@ -6,6 +6,33 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 7: Project Templates
+
+- `TemplateService@tesserabx-pm` ships project template CRUD plus the two big primitives: `snapshotFromProject(projectId)` walks an existing project (statuses, labels, custom fields, tasks with relative date offsets, subtasks) and returns a structured snapshot; `hydrate(data)` applies a template to a freshly-created project, recomputing dates against the new project's `start_date`. Snapshots are persisted as TEXT JSON in `pm_project_templates.structure_json`; the helper `createFromProject(data)` combines snapshot + create in one call for the admin form's primary "create from project" path.
+- Snapshot shape (versioned only by convention today; a `version` field can land later if the structure evolves):
+
+  ```jsonc
+  { statuses:[...], labels:[...], custom_fields:[...],
+    tasks:[ {
+        title, description, priority, is_client_visible,
+        status_name,                          // matched by name into the destination project's statuses
+        start_offset_days, due_offset_days,   // dateDiff from source project_start; null when source had no dates
+        estimated_hours, sort_order,
+        label_names: [...],                   // re-attached by name into the destination project's labels
+        subtasks: [...]
+    }, ... ] }
+  ```
+
+- Hydration is idempotent per-section: statuses delegate to `ProjectStatusService.hydrateFromTemplate` (Phase 2a guard already skips when present); labels / custom_fields / tasks each skip when the destination project already has any rows for that section. Hydration writes the `tesserabx-pm.template_applied` audit event that Phase 4b's manifest declared but no code fired until now.
+- `ProjectService.createProject` switched from `ProjectStatusService.hydrateFromTemplate` (statuses only) to `TemplateService.hydrate` (full hydration). Default template remains the seeded shared "Standard Workflow" so a freshly-created project still ships with the canonical five-column kanban out of the box.
+- New CBWires:
+  - `TemplateManager@tesserabx-pm` at `/agent/admin/pm/templates`. Inline create (blank or from-project), rename, edit description, toggle shared, delete. The list shows per-template counts (statuses / labels / custom fields / tasks / subtasks) parsed from `structure_json` so the operator can see at a glance what a template will hydrate.
+  - `TemplatePicker@tesserabx-pm` embedded inside `views/projects/new.bxm`'s create form. Card-grid selector with a hidden `templateSourceId` input that the existing POST handler picks up unchanged. Defaults to the shared "Standard Workflow" template id so an agent who skips the picker still gets a working board.
+- New handler + view + routeClaim: `handlers/admin/Templates.bx`, `views/admin/templates/index.bxm`, and a `routeClaims` entry for `/agent/admin/pm/templates` (PM's `entryPoint = "agent/pm"` cannot reach the admin URL space, so it's claimed via the manifest the same way `/agent/admin/pm` is). `adminPages` manifest gains a `pm.admin.templates` card linked from the admin landing.
+- New DTO: `TemplateDto@tesserabx-pm` with `fromTemplate` / `fromTemplateArray` returning snake_case structs and pre-parsed `structure`. New contract: `ITemplateService@tesserabx-pm`.
+- New test bundle `TemplateServiceSpec` (6 specs): list returns shared seed, create blank, snapshot captures every section with computed offsets, hydration rebuilds rows + recomputes the due date against the new project's start, audit row lands, hard delete. `InstallSpec` adds 4 new probes: TemplateService binding, TemplateDto binding, `pm.admin.templates` adminPages entry, route claim for `/agent/admin/pm/templates`. 50 specs total in InstallSpec.
+- Deferred: live edit of a template's structure (today the JSON snapshot is captured at create-from-project time and the admin edit form only touches name / description / shared flag — a structured edit UX over the JSON tree lands when there's a real need to mutate existing templates rather than re-snapshot from a current project).
+
 ### Phase 6b: Per-Project Custom Fields
 
 - `CustomFieldService@tesserabx-pm` ships per-project custom field definitions plus polymorphic value storage over Task / Subtask. Seven field types per BUILD-PLAN §6: `text`, `number`, `date`, `dropdown`, `multiselect`, `checkbox`, `url`. `field_type` is intentionally immutable after create (changing it would silently invalidate stored values; delete-and-recreate is the migration path); name, applies_to, required flag, sort order, and options are mutable.

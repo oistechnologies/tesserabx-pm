@@ -1,0 +1,586 @@
+/**
+ * TemplateService: pm_project_templates CRUD plus snapshot (from an
+ * existing project) and hydration (apply to a new project).
+ *
+ * The snapshot lives as TEXT JSON in `structure_json` because the
+ * JDBC driver does not bind jsonb cleanly through named parameters.
+ * Shape:
+ *
+ *   {
+ *       "statuses"      : [ { name, color, sort_order, is_default, is_completed }, ... ],
+ *       "labels"        : [ { name, color, sort_order }, ... ],
+ *       "custom_fields" : [ { name, field_type, options, is_required, applies_to, sort_order }, ... ],
+ *       "tasks"         : [ {
+ *           title, description, priority, is_client_visible,
+ *           status_name,                        // resolved against the new project's statuses on hydrate
+ *           start_offset_days, due_offset_days, // null when the source had no dates or no project start_date
+ *           estimated_hours,
+ *           sort_order,
+ *           label_names    : [ "name", ... ],
+ *           subtasks       : [ { title, description, due_offset_days, estimated_hours, sort_order, is_completed } , ... ]
+ *       }, ... ]
+ *   }
+ *
+ * Hydration is idempotent on the per-section level: ProjectStatusService
+ * already guards against re-hydrating an existing project's statuses;
+ * this service skips label / custom_field / task hydration when those
+ * tables already carry rows for the project. The intent is the user
+ * runs hydration once at project create.
+ *
+ * Phase 4b's manifest already declares `tesserabx-pm.template_applied`;
+ * hydrate() fires the corresponding `auditService.record` call so the
+ * audit dropdown surfaces a real row the first time a template is
+ * applied.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    // ---------------------------------------------------------------
+    // Reads
+    // ---------------------------------------------------------------
+
+    public any function getTemplate( required string id ){
+        var t = wirebox.getInstance( "ProjectTemplate@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( t ) ? javaCast( "null", "" ) : t;
+    }
+
+    /**
+     * Return templates an agent operating against `organizationId` can
+     * see: shared (NULL org) + their own tenant's rows. Pass an empty
+     * organizationId to return shared-only (the host-admin context).
+     */
+    public array function listTemplates( string organizationId = "" ){
+        var q = wirebox.getInstance( "ProjectTemplate@tesserabx-pm" )
+            .withoutGlobalScope();
+        if ( len( arguments.organizationId ) ) {
+            var orgId = arguments.organizationId;
+            q.where( function( inner ){
+                inner.whereNull( "organization_id" ).orWhere( "organization_id", orgId );
+            } );
+        } else {
+            q.whereNull( "organization_id" );
+        }
+        return q.orderBy( "is_shared", "desc" ).orderBy( "name", "asc" ).get();
+    }
+
+    // ---------------------------------------------------------------
+    // Definition CRUD
+    // ---------------------------------------------------------------
+
+    public any function createTemplate( required struct data ){
+        if ( !len( arguments.data.name ?: "" ) ) {
+            throw( type = "TemplateService.MissingField", message = "name is required." );
+        }
+        var structure = isStruct( arguments.data.structure ?: "" )
+            ? arguments.data.structure
+            : emptyStructure();
+
+        var t = wirebox.getInstance( "ProjectTemplate@tesserabx-pm" );
+        t.setId(             createUUID() );
+        t.setOrganizationId( len( arguments.data.organizationId ?: "" ) ? arguments.data.organizationId : javaCast( "null", "" ) );
+        t.setName(           trim( arguments.data.name ) );
+        t.setDescription(    arguments.data.description ?: "" );
+        t.setStructureJson(  jsonSerialize( structure ) );
+        t.setCreatedByType(  arguments.data.actorType ?: "system" );
+        t.setCreatedById(    len( arguments.data.actorId ?: "" ) ? arguments.data.actorId : javaCast( "null", "" ) );
+        t.setIsShared(       !!( arguments.data.isShared ?: false ) );
+        t.save();
+        return t;
+    }
+
+    public any function updateTemplate( required string id, required struct data ){
+        var t = getTemplate( arguments.id );
+        if ( isNull( t ) ) throw( type = "TemplateService.UnknownTemplate", message = "No template with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "name" ) ) {
+            var n = trim( arguments.data.name );
+            if ( !len( n ) ) throw( type = "TemplateService.MissingField", message = "name cannot be blank." );
+            t.setName( n );
+        }
+        if ( structKeyExists( arguments.data, "description" ) ) t.setDescription( arguments.data.description );
+        if ( structKeyExists( arguments.data, "isShared"    ) ) t.setIsShared(    !!arguments.data.isShared );
+        if ( structKeyExists( arguments.data, "structure"   ) && isStruct( arguments.data.structure ) ) {
+            t.setStructureJson( jsonSerialize( arguments.data.structure ) );
+        }
+        t.save();
+        return t;
+    }
+
+    public any function removeTemplate( required string id ){
+        var t = getTemplate( arguments.id );
+        if ( isNull( t ) ) throw( type = "TemplateService.UnknownTemplate", message = "No template with id [#arguments.id#]." );
+        queryExecute( "DELETE FROM pm_project_templates WHERE id = :id", { id : arguments.id } );
+        return t;
+    }
+
+    /**
+     * Convenience helper for the admin form's "create from project"
+     * path: snapshot + persist in one call. Returns the new template.
+     */
+    public any function createFromProject( required struct data ){
+        if ( !len( arguments.data.projectId ?: "" ) ) {
+            throw( type = "TemplateService.MissingField", message = "projectId is required." );
+        }
+        if ( !len( arguments.data.name ?: "" ) ) {
+            throw( type = "TemplateService.MissingField", message = "name is required." );
+        }
+        var structure = snapshotFromProject( arguments.data.projectId );
+        return createTemplate( {
+            organizationId : arguments.data.organizationId ?: "",
+            name           : arguments.data.name,
+            description    : arguments.data.description ?: "",
+            actorType      : arguments.data.actorType ?: "system",
+            actorId        : arguments.data.actorId   ?: "",
+            isShared       : !!( arguments.data.isShared ?: false ),
+            structure      : structure
+        } );
+    }
+
+    // ---------------------------------------------------------------
+    // Snapshot
+    // ---------------------------------------------------------------
+
+    /**
+     * Walk a project and return the canonical structure struct. SQL
+     * over Quick so we are safe in any thread context (matches the
+     * pattern used by ProjectEventService and TimeTrackingService).
+     */
+    public struct function snapshotFromProject( required string projectId ){
+        var project = queryExecute(
+            "SELECT id, start_date FROM pm_projects WHERE id = :id",
+            { id : arguments.projectId }
+        );
+        if ( !project.recordCount ) {
+            throw( type = "TemplateService.UnknownProject", message = "No project with id [#arguments.projectId#]." );
+        }
+        var startDate = project.start_date[ 1 ];
+        var hasStart  = isDate( startDate );
+
+        var statuses     = snapshotStatuses(    arguments.projectId );
+        var labels       = snapshotLabels(      arguments.projectId );
+        var customFields = snapshotCustomFields( arguments.projectId );
+        var tasks        = snapshotTasks(       arguments.projectId, hasStart ? startDate : "" );
+
+        return {
+            statuses      : statuses,
+            labels        : labels,
+            custom_fields : customFields,
+            tasks         : tasks
+        };
+    }
+
+    // ---------------------------------------------------------------
+    // Hydration
+    // ---------------------------------------------------------------
+
+    /**
+     * Apply a template to a project. Idempotent per-section:
+     *   - statuses delegated to ProjectStatusService (its own guard
+     *     skips when the project already has statuses)
+     *   - labels / custom_fields / tasks skip when the project has
+     *     any rows for that section already
+     * Fires `tesserabx-pm.template_applied` to the central audit log.
+     *
+     * actorType / actorId are recorded on the audit event and on any
+     * created tasks / subtasks; default "system" / "" when omitted.
+     */
+    public void function hydrate( required struct data ){
+        var projectId      = arguments.data.projectId      ?: "";
+        var templateId     = arguments.data.templateId     ?: "";
+        var organizationId = arguments.data.organizationId ?: "";
+        var actorType      = arguments.data.actorType      ?: "system";
+        var actorId        = arguments.data.actorId        ?: "";
+
+        if ( !len( projectId ) || !len( templateId ) || !len( organizationId ) ) return;
+
+        var template = getTemplate( templateId );
+        if ( isNull( template ) ) return;
+        var structureJson = template.getStructureJson() ?: "";
+        if ( !len( trim( structureJson ) ) ) return;
+
+        var structure = "";
+        try { structure = jsonDeserialize( structureJson ); }
+        catch ( any e ) {
+            writeLog(
+                text : "TemplateService.hydrate could not parse template [#templateId#] structure_json: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return;
+        }
+        if ( !isStruct( structure ) ) return;
+
+        var project = queryExecute(
+            "SELECT id, start_date FROM pm_projects WHERE id = :id",
+            { id : projectId }
+        );
+        if ( !project.recordCount ) return;
+        var projectStart = project.start_date[ 1 ];
+
+        // 1. Statuses (delegate; reuses Phase 2a guard).
+        wirebox.getInstance( "ProjectStatusService@tesserabx-pm" ).hydrateFromTemplate(
+            projectId      = projectId,
+            organizationId = organizationId,
+            templateId     = templateId
+        );
+
+        // 2. Labels.
+        hydrateLabels( projectId, organizationId, structure.labels ?: [] );
+
+        // 3. Custom fields.
+        hydrateCustomFields( projectId, organizationId, structure.custom_fields ?: [] );
+
+        // 4. Tasks (and their subtasks).
+        hydrateTasks(
+            projectId      = projectId,
+            organizationId = organizationId,
+            projectStart   = projectStart,
+            entries        = structure.tasks ?: [],
+            actorType      = actorType,
+            actorId        = actorId
+        );
+
+        // 5. Compliance audit. Best-effort: log + swallow if the
+        // audit service blows up (e.g. host downgrade).
+        try {
+            auditService.record(
+                eventType      : "tesserabx-pm.template_applied",
+                source         : "tesserabx-pm",
+                organizationId : organizationId,
+                actorType      : actorType,
+                actorId        : actorId,
+                entityType     : "Project",
+                entityId       : projectId,
+                metadata       : { templateId : templateId, templateName : template.getName() }
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TemplateService.hydrate audit write failed: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    // ---------- snapshot internals ----------
+
+    private array function snapshotStatuses( required string projectId ){
+        var rows = queryExecute(
+            "SELECT name, color, sort_order, is_default, is_completed
+             FROM   pm_project_statuses
+             WHERE  project_id = :pid
+             ORDER BY sort_order ASC",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                name         : rows.name[ i ],
+                color        : rows.color[ i ] ?: "",
+                sort_order   : rows.sort_order[ i ],
+                is_default   : !!rows.is_default[ i ],
+                is_completed : !!rows.is_completed[ i ]
+            } );
+        }
+        return out;
+    }
+
+    private array function snapshotLabels( required string projectId ){
+        var rows = queryExecute(
+            "SELECT name, color, sort_order
+             FROM   pm_labels
+             WHERE  project_id = :pid
+             ORDER BY sort_order ASC, name ASC",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                name       : rows.name[ i ],
+                color      : rows.color[ i ] ?: "",
+                sort_order : rows.sort_order[ i ]
+            } );
+        }
+        return out;
+    }
+
+    private array function snapshotCustomFields( required string projectId ){
+        var rows = queryExecute(
+            "SELECT name, field_type, options_json, is_required, applies_to, sort_order
+             FROM   pm_custom_fields
+             WHERE  project_id = :pid
+             ORDER BY sort_order ASC, name ASC",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var options = [];
+            var raw = rows.options_json[ i ] ?: "";
+            if ( len( raw ) ) {
+                try {
+                    var parsed = jsonDeserialize( raw );
+                    if ( isArray( parsed ) ) options = parsed;
+                } catch ( any e ) {}
+            }
+            out.append( {
+                name        : rows.name[ i ],
+                field_type  : rows.field_type[ i ],
+                options     : options,
+                is_required : !!rows.is_required[ i ],
+                applies_to  : rows.applies_to[ i ],
+                sort_order  : rows.sort_order[ i ]
+            } );
+        }
+        return out;
+    }
+
+    private array function snapshotTasks( required string projectId, any projectStart = "" ){
+        var tasks = queryExecute(
+            "SELECT t.id, t.title, t.description, t.priority, t.is_client_visible,
+                    t.start_date, t.due_date, t.estimated_hours, t.sort_order,
+                    s.name AS status_name
+             FROM   pm_tasks t
+             LEFT JOIN pm_project_statuses s ON s.id = t.status_id
+             WHERE  t.project_id = :pid
+               AND  t.deleted_at IS NULL
+             ORDER BY t.sort_order ASC, t.created_at ASC",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        var hasProjectStart = isDate( arguments.projectStart );
+
+        for ( var i = 1; i <= tasks.recordCount; i++ ) {
+            var taskId = tasks.id[ i ];
+
+            // Labels attached.
+            var labelRows = queryExecute(
+                "SELECT l.name
+                 FROM   pm_task_labels tl
+                 JOIN   pm_labels l ON l.id = tl.label_id
+                 WHERE  tl.task_id = :tid",
+                { tid : taskId }
+            );
+            var labelNames = [];
+            for ( var j = 1; j <= labelRows.recordCount; j++ ) labelNames.append( labelRows.name[ j ] );
+
+            // Subtasks.
+            var subRows = queryExecute(
+                "SELECT title, description, due_date, estimated_hours, sort_order, is_completed
+                 FROM   pm_subtasks
+                 WHERE  task_id = :tid
+                   AND  deleted_at IS NULL
+                 ORDER BY sort_order ASC, created_at ASC",
+                { tid : taskId }
+            );
+            var subtasks = [];
+            for ( var k = 1; k <= subRows.recordCount; k++ ) {
+                subtasks.append( {
+                    title           : subRows.title[ k ],
+                    description     : subRows.description[ k ] ?: "",
+                    due_offset_days : ( hasProjectStart && isDate( subRows.due_date[ k ] ) )
+                                        ? dateDiff( "d", arguments.projectStart, subRows.due_date[ k ] )
+                                        : javaCast( "null", "" ),
+                    estimated_hours : subRows.estimated_hours[ k ] ?: javaCast( "null", "" ),
+                    sort_order      : subRows.sort_order[ k ],
+                    is_completed    : !!subRows.is_completed[ k ]
+                } );
+            }
+
+            out.append( {
+                title             : tasks.title[ i ],
+                description       : tasks.description[ i ] ?: "",
+                priority          : tasks.priority[ i ],
+                is_client_visible : !!tasks.is_client_visible[ i ],
+                status_name       : tasks.status_name[ i ] ?: "",
+                start_offset_days : ( hasProjectStart && isDate( tasks.start_date[ i ] ) )
+                                      ? dateDiff( "d", arguments.projectStart, tasks.start_date[ i ] )
+                                      : javaCast( "null", "" ),
+                due_offset_days   : ( hasProjectStart && isDate( tasks.due_date[ i ] ) )
+                                      ? dateDiff( "d", arguments.projectStart, tasks.due_date[ i ] )
+                                      : javaCast( "null", "" ),
+                estimated_hours   : tasks.estimated_hours[ i ] ?: javaCast( "null", "" ),
+                sort_order        : tasks.sort_order[ i ],
+                label_names       : labelNames,
+                subtasks          : subtasks
+            } );
+        }
+        return out;
+    }
+
+    // ---------- hydrate internals ----------
+
+    private void function hydrateLabels( required string projectId, required string organizationId, required array entries ){
+        if ( !arrayLen( arguments.entries ) ) return;
+        var existing = queryExecute(
+            "SELECT COUNT(*) AS n FROM pm_labels WHERE project_id = :pid",
+            { pid : arguments.projectId }
+        );
+        if ( existing.n[ 1 ] > 0 ) return;
+
+        var labelSvc = wirebox.getInstance( "LabelService@tesserabx-pm" );
+        for ( var l in arguments.entries ) {
+            if ( !isStruct( l ) || !len( l.name ?: "" ) ) continue;
+            try {
+                labelSvc.createLabel( {
+                    projectId      : arguments.projectId,
+                    organizationId : arguments.organizationId,
+                    name           : l.name,
+                    color          : l.color      ?: "",
+                    sortOrder      : int( val( l.sort_order ?: 0 ) )
+                } );
+            } catch ( any e ) {
+                writeLog( text : "TemplateService hydrateLabels skipping [#l.name#]: #e.message#", log : "tesserabx", type : "warning" );
+            }
+        }
+    }
+
+    private void function hydrateCustomFields( required string projectId, required string organizationId, required array entries ){
+        if ( !arrayLen( arguments.entries ) ) return;
+        var existing = queryExecute(
+            "SELECT COUNT(*) AS n FROM pm_custom_fields WHERE project_id = :pid",
+            { pid : arguments.projectId }
+        );
+        if ( existing.n[ 1 ] > 0 ) return;
+
+        var cfSvc = wirebox.getInstance( "CustomFieldService@tesserabx-pm" );
+        for ( var f in arguments.entries ) {
+            if ( !isStruct( f ) || !len( f.name ?: "" ) || !len( f.field_type ?: "" ) ) continue;
+            try {
+                cfSvc.createField( {
+                    projectId      : arguments.projectId,
+                    organizationId : arguments.organizationId,
+                    name           : f.name,
+                    fieldType      : f.field_type,
+                    options        : isArray( f.options ?: "" ) ? f.options : ( f.options ?: "" ),
+                    isRequired     : !!( f.is_required ?: false ),
+                    appliesTo      : f.applies_to ?: "both",
+                    sortOrder      : int( val( f.sort_order ?: 0 ) )
+                } );
+            } catch ( any e ) {
+                writeLog( text : "TemplateService hydrateCustomFields skipping [#f.name#]: #e.message#", log : "tesserabx", type : "warning" );
+            }
+        }
+    }
+
+    private void function hydrateTasks(
+        required string projectId,
+        required string organizationId,
+        required any    projectStart,
+        required array  entries,
+        required string actorType,
+        required string actorId
+    ){
+        if ( !arrayLen( arguments.entries ) ) return;
+        var existing = queryExecute(
+            "SELECT COUNT(*) AS n FROM pm_tasks WHERE project_id = :pid AND deleted_at IS NULL",
+            { pid : arguments.projectId }
+        );
+        if ( existing.n[ 1 ] > 0 ) return;
+
+        var hasStart = isDate( arguments.projectStart );
+
+        // Map status_name -> status_id within the new project so the
+        // hydrated task lands in the same logical column.
+        var statusByName = {};
+        var sRows = queryExecute(
+            "SELECT id, name FROM pm_project_statuses WHERE project_id = :pid",
+            { pid : arguments.projectId }
+        );
+        for ( var i = 1; i <= sRows.recordCount; i++ ) statusByName[ lCase( sRows.name[ i ] ) ] = sRows.id[ i ];
+
+        // Same for labels.
+        var labelByName = {};
+        var lRows = queryExecute(
+            "SELECT id, name FROM pm_labels WHERE project_id = :pid",
+            { pid : arguments.projectId }
+        );
+        for ( var j = 1; j <= lRows.recordCount; j++ ) labelByName[ lCase( lRows.name[ j ] ) ] = lRows.id[ j ];
+
+        var taskSvc    = wirebox.getInstance( "TaskService@tesserabx-pm"    );
+        var subtaskSvc = wirebox.getInstance( "SubtaskService@tesserabx-pm" );
+        var labelSvc   = wirebox.getInstance( "LabelService@tesserabx-pm"   );
+
+        for ( var t in arguments.entries ) {
+            if ( !isStruct( t ) || !len( t.title ?: "" ) ) continue;
+            var startDate = "";
+            var dueDate   = "";
+            if ( hasStart && isNumeric( t.start_offset_days ?: "" ) ) {
+                startDate = dateFormat( dateAdd( "d", t.start_offset_days, arguments.projectStart ), "yyyy-mm-dd" );
+            }
+            if ( hasStart && isNumeric( t.due_offset_days ?: "" ) ) {
+                dueDate   = dateFormat( dateAdd( "d", t.due_offset_days,   arguments.projectStart ), "yyyy-mm-dd" );
+            }
+            var statusId = statusByName[ lCase( t.status_name ?: "" ) ] ?: "";
+
+            try {
+                var taskData = {
+                    projectId       : arguments.projectId,
+                    organizationId  : arguments.organizationId,
+                    title           : t.title,
+                    description     : t.description       ?: "",
+                    priority        : t.priority          ?: "medium",
+                    isClientVisible : !!( t.is_client_visible ?: false ),
+                    sortOrder       : int( val( t.sort_order ?: 0 ) ),
+                    actorType       : arguments.actorType,
+                    actorId         : arguments.actorId
+                };
+                if ( len( statusId ) ) taskData.statusId = statusId;
+                if ( len( startDate ) ) taskData.startDate = startDate;
+                if ( len( dueDate   ) ) taskData.dueDate   = dueDate;
+                if ( isNumeric( t.estimated_hours ?: "" ) ) taskData.estimatedHours = t.estimated_hours;
+
+                var newTask = taskSvc.createTask( taskData );
+
+                // Attach labels by name -> id.
+                for ( var lname in ( t.label_names ?: [] ) ) {
+                    var lid = labelByName[ lCase( lname ) ] ?: "";
+                    if ( len( lid ) ) labelSvc.attachToTask( newTask.getId(), lid );
+                }
+
+                // Subtasks.
+                for ( var st in ( t.subtasks ?: [] ) ) {
+                    if ( !isStruct( st ) || !len( st.title ?: "" ) ) continue;
+                    var subDue = "";
+                    if ( hasStart && isNumeric( st.due_offset_days ?: "" ) ) {
+                        subDue = dateFormat( dateAdd( "d", st.due_offset_days, arguments.projectStart ), "yyyy-mm-dd" );
+                    }
+                    var subData = {
+                        taskId         : newTask.getId(),
+                        organizationId : arguments.organizationId,
+                        title          : st.title,
+                        description    : st.description    ?: "",
+                        sortOrder      : int( val( st.sort_order ?: 0 ) ),
+                        isCompleted    : !!( st.is_completed ?: false ),
+                        actorType      : arguments.actorType,
+                        actorId        : arguments.actorId
+                    };
+                    if ( len( subDue ) ) subData.dueDate = subDue;
+                    if ( isNumeric( st.estimated_hours ?: "" ) ) subData.estimatedHours = st.estimated_hours;
+                    try { subtaskSvc.createSubtask( subData ); }
+                    catch ( any e ) {
+                        writeLog( text : "TemplateService hydrateTasks subtask [#st.title#] skipped: #e.message#", log : "tesserabx", type : "warning" );
+                    }
+                }
+            } catch ( any e ) {
+                writeLog( text : "TemplateService hydrateTasks task [#t.title#] skipped: #e.message#", log : "tesserabx", type : "warning" );
+            }
+        }
+    }
+
+    // ---------- shared ----------
+
+    private struct function emptyStructure(){
+        return {
+            statuses      : [],
+            labels        : [],
+            custom_fields : [],
+            tasks         : []
+        };
+    }
+
+}

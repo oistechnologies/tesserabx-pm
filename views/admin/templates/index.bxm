@@ -1,0 +1,16 @@
+<bx:output>
+<div class="container-fluid">
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-0 small">
+            <li class="breadcrumb-item"><a href="/agent/admin" class="link-secondary">Admin</a></li>
+            <li class="breadcrumb-item"><a href="/agent/admin/pm" class="link-secondary">PM</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Templates</li>
+        </ol>
+    </nav>
+
+    <h1 class="mb-3 fs-3">PM templates</h1>
+    <p class="text-body-secondary small">Capture an existing project's structure (statuses, labels, custom fields, tasks, subtasks) so new projects can hydrate from it. Mark a template as Shared to make it available to every tenant; otherwise it lives within your tenant's scope.</p>
+
+    #wire( name = "TemplateManager@tesserabx-pm" )#
+</div>
+</bx:output>

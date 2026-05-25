@@ -1,0 +1,112 @@
+<bx:output>
+<bx:script>
+    local.templates = templates();
+    local.projects  = projects();
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+    <bx:if len( notice )>
+        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+            <span>#encodeForHTML( notice )#</span>
+            <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+        </div>
+    </bx:if>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h2 class="h5 mb-3"><i class="bi bi-plus-square"></i> New template</h2>
+            <form wire:submit.prevent="create" class="row g-2">
+                <div class="col-12 col-md-4">
+                    <label class="form-label small mb-0" for="tm-name">Name <span class="text-danger">*</span></label>
+                    <input id="tm-name" type="text" class="form-control form-control-sm" wire:model="newName" maxlength="200">
+                </div>
+                <div class="col-12 col-md-5">
+                    <label class="form-label small mb-0" for="tm-desc">Description</label>
+                    <input id="tm-desc" type="text" class="form-control form-control-sm" wire:model="newDescription" maxlength="500">
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-0" for="tm-src">Snapshot from project</label>
+                    <select id="tm-src" class="form-select form-select-sm" wire:model="newFromProject">
+                        <option value="">(blank template)</option>
+                        <bx:loop array="#local.projects#" item="p">
+                            <option value="#encodeForHTMLAttribute( p.getId() )#">#encodeForHTML( p.getName() )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end">
+                    <div class="form-check form-switch w-100">
+                        <input id="tm-share" type="checkbox" class="form-check-input" wire:model="newIsShared">
+                        <label class="form-check-label small" for="tm-share">Shared</label>
+                    </div>
+                </div>
+                <div class="col-12 text-end">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Templates <span class="badge text-bg-secondary">#arrayLen( local.templates )#</span></h2>
+            <bx:if !arrayLen( local.templates )>
+                <p class="text-body-secondary small fst-italic mb-0">No templates yet.</p>
+            <bx:else>
+                <ul class="list-unstyled mb-0">
+                    <bx:loop array="#local.templates#" item="t">
+                        <bx:set local.s = summary( t ) >
+                        <li class="border-top pt-3 pb-3">
+                            <bx:if data.editingId eq t.getId()>
+                                <div class="row g-2">
+                                    <div class="col-12 col-md-4">
+                                        <input type="text" class="form-control form-control-sm" wire:model="editName" placeholder="Name">
+                                    </div>
+                                    <div class="col-12 col-md-5">
+                                        <input type="text" class="form-control form-control-sm" wire:model="editDescription" placeholder="Description">
+                                    </div>
+                                    <div class="col-6 col-md-2 d-flex align-items-end">
+                                        <div class="form-check form-switch w-100">
+                                            <input type="checkbox" class="form-check-input" wire:model="editIsShared" id="tm-edit-share-#encodeForHTMLAttribute( t.getId() )#">
+                                            <label class="form-check-label small" for="tm-edit-share-#encodeForHTMLAttribute( t.getId() )#">Shared</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-6 col-md-1 d-flex gap-1 align-items-end">
+                                        <button class="btn btn-sm btn-primary" wire:click="saveEdit()"><i class="bi bi-check-lg"></i></button>
+                                        <button class="btn btn-sm btn-outline-secondary" wire:click="cancelEdit()"><i class="bi bi-x-lg"></i></button>
+                                    </div>
+                                </div>
+                            <bx:else>
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <div>
+                                        <strong>#encodeForHTML( t.getName() )#</strong>
+                                        <bx:if !!t.getIsShared()>
+                                            <span class="badge text-bg-info ms-2"><i class="bi bi-globe"></i> shared</span>
+                                        </bx:if>
+                                        <bx:if isNull( t.getOrganizationId() ) or !len( t.getOrganizationId() ?: "" )>
+                                            <span class="badge text-bg-secondary ms-1">global</span>
+                                        </bx:if>
+                                        <bx:if len( t.getDescription() ?: "" )>
+                                            <div class="text-body-secondary small">#encodeForHTML( t.getDescription() )#</div>
+                                        </bx:if>
+                                        <div class="small text-body-secondary mt-1">
+                                            <span class="me-2"><i class="bi bi-list-columns"></i> #local.s.statuses# statuses</span>
+                                            <span class="me-2"><i class="bi bi-tags"></i> #local.s.labels# labels</span>
+                                            <span class="me-2"><i class="bi bi-pencil-square"></i> #local.s.custom_fields# fields</span>
+                                            <span class="me-2"><i class="bi bi-card-checklist"></i> #local.s.tasks# tasks</span>
+                                            <span><i class="bi bi-list-task"></i> #local.s.subtasks# subtasks</span>
+                                        </div>
+                                    </div>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( t.getId() )#')" title="Edit"><i class="bi bi-pencil"></i></button>
+                                        <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( t.getId() )#')" wire:confirm="Delete this template? Projects already created from it are unaffected." title="Delete"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                </div>
+                            </bx:if>
+                        </li>
+                    </bx:loop>
+                </ul>
+            </bx:if>
+        </div>
+    </div>
+</div>
+</bx:output>

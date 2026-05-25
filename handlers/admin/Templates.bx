@@ -1,0 +1,20 @@
+/**
+ * Admin Templates handler. Mounts the TemplateManager wire under
+ * the host's admin surface at /agent/admin/pm/templates.
+ *
+ * Reached through the manifest `routeClaims` entry rather than PM's
+ * own Router because /agent/admin/* lives outside this module's
+ * entryPoint.
+ */
+class {
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "PM templates";
+        event.setView( view = "admin/templates/index", module = "tesserabx-pm" );
+    }
+
+}

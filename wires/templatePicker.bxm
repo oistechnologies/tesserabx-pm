@@ -1,0 +1,48 @@
+<bx:output>
+<bx:script>
+    local.templates = templates();
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+    <label class="form-label">Template</label>
+    <p class="text-body-secondary small mb-2">Pick a structure to hydrate the new project with. The shared "Standard Workflow" template seeds the canonical five-column kanban; custom templates can include labels, custom fields, tasks, and subtasks.</p>
+
+    <input type="hidden" name="templateSourceId" value="#encodeForHTMLAttribute( data.selectedTemplateId )#">
+
+    <div class="row g-2">
+        <bx:loop array="#local.templates#" item="t">
+            <bx:set local.s        = summary( t ) >
+            <bx:set local.selected = data.selectedTemplateId eq t.getId() >
+            <div class="col-12 col-md-6">
+                <div class="card h-100 <bx:if local.selected>border-primary<bx:else>border</bx:if>"
+                     wire:click="select('#encodeForHTMLAttribute( t.getId() )#')"
+                     style="cursor: pointer;">
+                    <div class="card-body py-2">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div>
+                                <strong>#encodeForHTML( t.getName() )#</strong>
+                                <bx:if !!t.getIsShared()>
+                                    <span class="badge text-bg-info ms-1"><i class="bi bi-globe"></i> shared</span>
+                                </bx:if>
+                            </div>
+                            <bx:if local.selected>
+                                <i class="bi bi-check-circle-fill text-primary"></i>
+                            </bx:if>
+                        </div>
+                        <bx:if len( t.getDescription() ?: "" )>
+                            <div class="text-body-secondary small mt-1">#encodeForHTML( t.getDescription() )#</div>
+                        </bx:if>
+                        <div class="small text-body-secondary mt-1">
+                            <span class="me-2"><i class="bi bi-list-columns"></i> #local.s.statuses#</span>
+                            <span class="me-2"><i class="bi bi-tags"></i> #local.s.labels#</span>
+                            <span class="me-2"><i class="bi bi-pencil-square"></i> #local.s.custom_fields#</span>
+                            <span class="me-2"><i class="bi bi-card-checklist"></i> #local.s.tasks#</span>
+                            <span><i class="bi bi-list-task"></i> #local.s.subtasks#</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </bx:loop>
+    </div>
+</div>
+</bx:output>

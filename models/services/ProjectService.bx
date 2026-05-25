@@ -132,23 +132,26 @@ class singleton=true {
         project.setUpdatedById(         arguments.data.actorId   ?: javaCast( "null", "" ) );
         project.save();
 
-        // Seed default kanban statuses from the shared "Standard
-        // Workflow" template so the new project ships with a
-        // usable board out of the box. Phase 7 TemplateService
-        // takes over template selection; until then every project
-        // gets the canonical 5-column workflow.
+        // Hydrate from a template. Phase 2a delegated to
+        // ProjectStatusService (statuses only); Phase 7 routes
+        // through TemplateService so labels, custom fields, tasks,
+        // and subtasks land as well. Defaults to the shared
+        // "Standard Workflow" template so a freshly-created project
+        // ships with a usable five-column kanban out of the box.
         var templateId = len( arguments.data.templateSourceId ?: "" )
             ? arguments.data.templateSourceId
             : variables.STANDARD_WORKFLOW_TEMPLATE_ID;
         try {
-            projectStatusService.hydrateFromTemplate(
-                projectId      = project.getId(),
-                organizationId = project.getOrganizationId(),
-                templateId     = templateId
-            );
+            wirebox.getInstance( "TemplateService@tesserabx-pm" ).hydrate( {
+                projectId      : project.getId(),
+                templateId     : templateId,
+                organizationId : project.getOrganizationId(),
+                actorType      : arguments.data.actorType ?: "system",
+                actorId        : arguments.data.actorId   ?: ""
+            } );
         } catch ( any e ) {
             writeLog(
-                text : "ProjectService.createProject hydrateFromTemplate failed for [#project.getId()#]: #e.message#",
+                text : "ProjectService.createProject template hydrate failed for [#project.getId()#]: #e.message#",
                 log  : "tesserabx",
                 type : "warning"
             );

@@ -133,8 +133,13 @@ class {
                 // claims match before the host's catch-all.
                 routeClaims : [
                     // Cross-surface landing URLs.
-                    { path : "/pm",             verbs : "GET",    module : "tesserabx-pm", handler : "Main", action : "index" },
-                    { path : "/agent/admin/pm", verbs : "GET",    module : "tesserabx-pm", handler : "Main", action : "index" },
+                    { path : "/pm",                       verbs : "GET", module : "tesserabx-pm", handler : "Main",            action : "index" },
+                    { path : "/agent/admin/pm",           verbs : "GET", module : "tesserabx-pm", handler : "Main",            action : "index" },
+                    // Phase 7: admin templates landing. Lives in the
+                    // admin surface URL space which sits outside PM's
+                    // entryPoint, so it is registered here rather than
+                    // in config/Router.bx.
+                    { path : "/agent/admin/pm/templates", verbs : "GET", module : "tesserabx-pm", handler : "admin.Templates", action : "index" },
 
                     // REST API — Projects.
                     { path : "/api/v1/pm/projects",              verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Projects", action : "index"   },
@@ -206,6 +211,16 @@ class {
                         route              : "/agent/admin/pm",
                         icon               : "bi bi-kanban",
                         sortWeight         : 600,
+                        requiredPermission : "pm.admin"
+                    },
+                    // Phase 7: project templates admin (snapshot + hydrate).
+                    {
+                        id                 : "pm.admin.templates",
+                        title              : "PM Templates",
+                        description        : "Manage project templates: snapshot from existing projects, edit, share, delete.",
+                        route              : "/agent/admin/pm/templates",
+                        icon               : "bi bi-file-earmark-text",
+                        sortWeight         : 610,
                         requiredPermission : "pm.admin"
                     }
                 ],
@@ -406,6 +421,9 @@ class {
         binder.map( "CustomFieldService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.CustomFieldService" )
               .asSingleton();
+        binder.map( "TemplateService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.TemplateService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -434,6 +452,9 @@ class {
               .asSingleton();
         binder.map( "CustomFieldValueDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.CustomFieldValueDto" )
+              .asSingleton();
+        binder.map( "TemplateDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.TemplateDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

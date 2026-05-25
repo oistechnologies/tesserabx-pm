@@ -1,0 +1,35 @@
+/**
+ * TemplateDto: snake-case shape for pm_project_templates rows on
+ * the wire. `structure` is parsed back to a struct so consumers do
+ * not need to JSON-decode.
+ */
+class singleton=true {
+
+    public struct function fromTemplate( required any t ){
+        var structure = {};
+        var raw = arguments.t.getStructureJson() ?: "";
+        if ( len( raw ) ) {
+            try { structure = jsonDeserialize( raw ); }
+            catch ( any e ) { structure = {}; }
+        }
+        return {
+            id              : arguments.t.getId(),
+            organization_id : arguments.t.getOrganizationId() ?: "",
+            name            : arguments.t.getName(),
+            description     : arguments.t.getDescription() ?: "",
+            is_shared       : !!arguments.t.getIsShared(),
+            structure       : structure,
+            created_by_type : arguments.t.getCreatedByType() ?: "",
+            created_by_id   : arguments.t.getCreatedById()   ?: "",
+            created_at      : isDate( arguments.t.getCreatedAt() ) ? dateTimeFormat( arguments.t.getCreatedAt(), "iso" ) : "",
+            updated_at      : isDate( arguments.t.getUpdatedAt() ) ? dateTimeFormat( arguments.t.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromTemplateArray( required array templates ){
+        var out = [];
+        for ( var t in arguments.templates ) out.append( fromTemplate( t ) );
+        return out;
+    }
+
+}

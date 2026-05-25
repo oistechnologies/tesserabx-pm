@@ -360,6 +360,31 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.wb.getInstance( "CustomFieldValueDto@tesserabx-pm" ) ).notToBeNull();
             } );
 
+            // ---- Phase 7: templates.
+
+            it( "binds TemplateService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TemplateService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds TemplateDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TemplateDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the pm.admin.templates adminPage", function(){
+                var hits = variables.adminPages.listAll().filter( ( c ) => c.id == "pm.admin.templates" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].route              ).toBe( "/agent/admin/pm/templates" );
+                expect( hits[ 1 ].requiredPermission ).toBe( "pm.admin" );
+            } );
+
+            it( "claims /agent/admin/pm/templates in RouteClaimsRegistry@core", function(){
+                var claim = variables.routeClaims.findByPath( "/agent/admin/pm/templates" );
+                expect( claim ).notToBeNull();
+                expect( claim.module  ).toBe( "tesserabx-pm" );
+                expect( claim.handler ).toBe( "admin.Templates" );
+                expect( claim.action  ).toBe( "index" );
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

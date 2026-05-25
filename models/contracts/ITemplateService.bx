@@ -1,0 +1,29 @@
+/**
+ * ITemplateService: documentation contract for project template
+ * snapshot + hydration.
+ *
+ * Methods (live signatures on TemplateService):
+ *
+ *   any    getTemplate( id )
+ *   array  listTemplates( organizationId = "" )
+ *   any    createTemplate( data )
+ *   any    updateTemplate( id, data )
+ *   any    removeTemplate( id )
+ *   any    createFromProject( data )
+ *   struct snapshotFromProject( projectId )
+ *   void   hydrate( data )
+ *
+ * `hydrate` accepts a struct with keys: projectId, templateId,
+ * organizationId, actorType, actorId. Fires
+ * `tesserabx-pm.template_applied` to AuditService@audit.
+ */
+class {
+
+    function init(){
+        throw(
+            type    = "ITemplateService.DoNotInstantiate",
+            message = "ITemplateService is a documentation contract. Inject TemplateService@tesserabx-pm instead."
+        );
+    }
+
+}

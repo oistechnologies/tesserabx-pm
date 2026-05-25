@@ -1,0 +1,55 @@
+/**
+ * TemplatePicker: card-grid template selector for the new-project
+ * flow. Embedded inside views/projects/new.bxm's create form; the
+ * wire renders a hidden `templateSourceId` input that the form
+ * submission picks up alongside the rest of the project fields.
+ *
+ * Defaults to the seeded "Standard Workflow" template so the agent
+ * gets a working five-column kanban out of the box without having
+ * to pick anything.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="templateService" inject="TemplateService@tesserabx-pm";
+
+    data = {
+        "selectedTemplateId" : ""
+    };
+
+    function onMount( required struct params = {} ){
+        data.selectedTemplateId = arguments.params.selectedTemplateId
+            ?: "00000000-0000-0000-0000-00000000pm01";
+    }
+
+    function templates(){
+        return templateService.listTemplates();
+    }
+
+    function select( id ){
+        data.selectedTemplateId = arguments.id ?: "";
+    }
+
+    /**
+     * Same shape as TemplateManager.summary so the cards can show
+     * counts without each card making its own JSON parse.
+     */
+    function summary( required any template ){
+        var raw = arguments.template.getStructureJson() ?: "";
+        var out = { statuses : 0, labels : 0, custom_fields : 0, tasks : 0, subtasks : 0 };
+        if ( !len( raw ) ) return out;
+        try {
+            var s = jsonDeserialize( raw );
+            if ( !isStruct( s ) ) return out;
+            out.statuses      = arrayLen( s.statuses      ?: [] );
+            out.labels        = arrayLen( s.labels        ?: [] );
+            out.custom_fields = arrayLen( s.custom_fields ?: [] );
+            var tasks = s.tasks ?: [];
+            out.tasks         = arrayLen( tasks );
+            var subCount = 0;
+            for ( var t in tasks ) subCount += arrayLen( t.subtasks ?: [] );
+            out.subtasks      = subCount;
+        } catch ( any e ) {}
+        return out;
+    }
+
+}

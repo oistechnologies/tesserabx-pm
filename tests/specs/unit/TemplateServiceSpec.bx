@@ -1,0 +1,222 @@
+/**
+ * TemplateServiceSpec: snapshot a project, hydrate a new project
+ * from the snapshot, verify statuses/labels/custom-fields/tasks
+ * land + the audit event fires.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "TemplateService@tesserabx-pm"     );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm"      );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm"         );
+        variables.subtaskSvc = variables.wb.getInstance( "SubtaskService@tesserabx-pm"      );
+        variables.labelSvc   = variables.wb.getInstance( "LabelService@tesserabx-pm"        );
+        variables.cfSvc      = variables.wb.getInstance( "CustomFieldService@tesserabx-pm"  );
+        variables.statusSvc  = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "TemplateService@tesserabx-pm", function(){
+
+            var fixtureOrgIds   = [];
+            var fixtureTemplate = "";
+
+            afterEach( function( currentSpec ){
+                sleep( 200 );
+                if ( len( fixtureTemplate ) ) {
+                    queryExecute( "DELETE FROM pm_project_templates WHERE id = :id", { id : fixtureTemplate } );
+                    fixtureTemplate = "";
+                }
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "listTemplates returns shared templates for any org", function(){
+                var ctx  = setupOrg( fixtureOrgIds );
+                var list = variables.svc.listTemplates( ctx.orgId );
+                var ids  = list.map( ( t ) => t.getId() );
+                expect( ids ).toInclude( "00000000-0000-0000-0000-00000000pm01" );
+            } );
+
+            it( "createTemplate persists a blank template", function(){
+                var ctx = setupOrg( fixtureOrgIds );
+                var t = variables.svc.createTemplate( {
+                    organizationId : ctx.orgId,
+                    name           : "Empty " & createUUID(),
+                    description    : "test",
+                    isShared       : false
+                } );
+                fixtureTemplate = t.getId();
+                expect( t.getName() ).toContain( "Empty" );
+                expect( !!t.getIsShared() ).toBeFalse();
+            } );
+
+            it( "snapshotFromProject captures statuses, labels, custom fields, tasks, subtasks with offsets", function(){
+                var ctx = setupRichProject( fixtureOrgIds );
+                var structure = variables.svc.snapshotFromProject( ctx.project.getId() );
+
+                expect( arrayLen( structure.statuses      ) ).toBeGTE( 5 );  // Standard Workflow seeded
+                expect( arrayLen( structure.labels        ) ).toBe( 2 );
+                expect( arrayLen( structure.custom_fields ) ).toBe( 1 );
+                expect( arrayLen( structure.tasks         ) ).toBe( 1 );
+
+                var taskSnap = structure.tasks[ 1 ];
+                expect( taskSnap.title ).toBe( "Hydrate Me" );
+                expect( taskSnap.due_offset_days ).toBe( 5 );
+                expect( arrayLen( taskSnap.label_names ) ).toBe( 1 );
+                expect( arrayLen( taskSnap.subtasks    ) ).toBe( 1 );
+                expect( taskSnap.subtasks[ 1 ].due_offset_days ).toBe( 2 );
+            } );
+
+            it( "hydrate writes statuses, labels, custom_fields, tasks, subtasks into a new project", function(){
+                var src = setupRichProject( fixtureOrgIds );
+
+                var template = variables.svc.createFromProject( {
+                    projectId      : src.project.getId(),
+                    organizationId : src.orgId,
+                    name           : "Snapshot " & createUUID(),
+                    description    : "captured",
+                    isShared       : false,
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                fixtureTemplate = template.getId();
+
+                // Brand-new project in a fresh org with no statuses pre-hydrated.
+                var dstOrg = createUUID();
+                queryExecute(
+                    "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+                     VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+                    { id : dstOrg, name : "tmpl-dst-" & createUUID(), slug : "tmpl-dst-" & createUUID() }
+                );
+                fixtureOrgIds.append( dstOrg );
+
+                // createProject hydrates against the shared seed; we'll
+                // call hydrate explicitly with our snapshot template.
+                var dst = variables.projectSvc.createProject( {
+                    organizationId    : dstOrg,
+                    name              : "Hydrated",
+                    startDate         : "2026-09-01",
+                    templateSourceId  : template.getId()
+                } );
+
+                // Statuses: at least 5 (the snapshot or the default).
+                expect( arrayLen( variables.statusSvc.listForProject( dst.getId() ) ) ).toBeGTE( 5 );
+
+                // Labels and custom fields should land from the snapshot.
+                expect( arrayLen( variables.labelSvc.listForProject( dst.getId() ) ) ).toBe( 2 );
+                expect( arrayLen( variables.cfSvc.listForProject(    dst.getId() ) ) ).toBe( 1 );
+
+                // The task hydrates with a recomputed due date.
+                var tasksRow = queryExecute(
+                    "SELECT title, due_date FROM pm_tasks WHERE project_id = :pid AND deleted_at IS NULL",
+                    { pid : dst.getId() }
+                );
+                expect( tasksRow.recordCount ).toBe( 1 );
+                expect( tasksRow.title[ 1 ] ).toBe( "Hydrate Me" );
+                expect( dateFormat( tasksRow.due_date[ 1 ], "yyyy-mm-dd" ) ).toBe( "2026-09-06" );  // 2026-09-01 + 5 days
+            } );
+
+            it( "hydrate writes tesserabx-pm.template_applied audit row", function(){
+                var src = setupRichProject( fixtureOrgIds );
+                var template = variables.svc.createFromProject( {
+                    projectId      : src.project.getId(),
+                    organizationId : src.orgId,
+                    name           : "Audit " & createUUID(),
+                    actorType      : "agent",
+                    actorId        : createUUID()
+                } );
+                fixtureTemplate = template.getId();
+
+                var dstOrg = createUUID();
+                queryExecute(
+                    "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+                     VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+                    { id : dstOrg, name : "audit-" & createUUID(), slug : "audit-" & createUUID() }
+                );
+                fixtureOrgIds.append( dstOrg );
+
+                var dst = variables.projectSvc.createProject( {
+                    organizationId    : dstOrg,
+                    name              : "Audited Hydration",
+                    templateSourceId  : template.getId(),
+                    actorType         : "agent",
+                    actorId           : createUUID()
+                } );
+
+                var row = queryExecute(
+                    "SELECT COUNT(*) AS n FROM audit_events
+                     WHERE event_type = 'tesserabx-pm.template_applied'
+                       AND source     = 'tesserabx-pm'
+                       AND entity_id  = :pid",
+                    { pid : dst.getId() }
+                );
+                expect( row.n[ 1 ] ).toBeGTE( 1 );
+            } );
+
+            it( "removeTemplate is a hard delete", function(){
+                var ctx = setupOrg( fixtureOrgIds );
+                var t = variables.svc.createTemplate( { organizationId : ctx.orgId, name : "del-" & createUUID() } );
+                variables.svc.removeTemplate( t.getId() );
+                expect( variables.svc.getTemplate( t.getId() ) ).toBeNull();
+            } );
+
+        } );
+    }
+
+    private struct function setupOrg( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "tmpl-" & createUUID(), slug : "tmpl-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        return { orgId : orgId };
+    }
+
+    /**
+     * Build a source project the snapshot can chew on: 2 labels,
+     * 1 custom field, 1 task with 1 label attached + 1 subtask,
+     * a project start date so offsets compute.
+     */
+    private struct function setupRichProject( required array fixtureOrgIds ){
+        var ctx = setupOrg( arguments.fixtureOrgIds );
+        var project = variables.projectSvc.createProject( {
+            organizationId : ctx.orgId,
+            name           : "Source " & createUUID(),
+            startDate      : "2026-06-01"
+        } );
+
+        var lblA = variables.labelSvc.createLabel( { projectId : project.getId(), organizationId : ctx.orgId, name : "A", color : "##d00", sortOrder : 0 } );
+        var lblB = variables.labelSvc.createLabel( { projectId : project.getId(), organizationId : ctx.orgId, name : "B", color : "##0d0", sortOrder : 1 } );
+
+        variables.cfSvc.createField( { projectId : project.getId(), organizationId : ctx.orgId, name : "Severity", fieldType : "dropdown", options : "Low,Medium,High", isRequired : false, appliesTo : "task" } );
+
+        var task = variables.taskSvc.createTask( {
+            projectId      : project.getId(),
+            organizationId : ctx.orgId,
+            title          : "Hydrate Me",
+            description    : "",
+            dueDate        : "2026-06-06",  // +5 days from project start
+            actorType      : "agent",
+            actorId        : createUUID()
+        } );
+        variables.labelSvc.attachToTask( task.getId(), lblA.getId() );
+
+        variables.subtaskSvc.createSubtask( {
+            taskId         : task.getId(),
+            organizationId : ctx.orgId,
+            title          : "Sub one",
+            dueDate        : "2026-06-03"   // +2 days from project start
+        } );
+
+        return { orgId : ctx.orgId, project : project, task : task };
+    }
+
+}
