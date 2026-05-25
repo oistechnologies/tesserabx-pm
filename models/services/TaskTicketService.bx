@@ -16,7 +16,9 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
+    property name="wirebox"             inject="wirebox";
+    property name="interceptorService"  inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
 
     variables.VALID_LINK_TYPES   = [ "related", "blocks", "fixes" ];
     variables.VALID_ACTOR_TYPES  = [ "agent", "contact", "system" ];
@@ -169,14 +171,32 @@ class singleton=true {
             }
         );
 
-        return getLinkByPair( arguments.data.taskId, arguments.data.ticketId );
+        var link = getLinkByPair( arguments.data.taskId, arguments.data.ticketId );
+        if ( !isNull( link ) ) {
+            announceLinkEvent(
+                eventName : "onPmTicketLinked",
+                link      : link,
+                actorType : actorType,
+                actorId   : arguments.data.actorId ?: ""
+            );
+        }
+        return link;
     }
 
     public void function unlink( required string taskId, required string ticketId ){
+        var existing = getLinkByPair( arguments.taskId, arguments.ticketId );
         queryExecute(
             "DELETE FROM pm_task_tickets WHERE task_id = :tid AND ticket_id = :ticketId",
             { tid : arguments.taskId, ticketId : arguments.ticketId }
         );
+        if ( !isNull( existing ) ) {
+            announceLinkEvent(
+                eventName : "onPmTicketUnlinked",
+                link      : existing,
+                actorType : "system",
+                actorId   : ""
+            );
+        }
     }
 
     public any function setLinkType( required string taskId, required string ticketId, required string linkType ){
@@ -192,6 +212,46 @@ class singleton=true {
             { lt : arguments.linkType, tid : arguments.taskId, ticketId : arguments.ticketId }
         );
         return getLinkByPair( arguments.taskId, arguments.ticketId );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Best-effort sync announce of onPmTicketLinked /
+     * onPmTicketUnlinked. Matches the Phase 4b sync policy; a
+     * failure here must not break the originating link / unlink
+     * call.
+     */
+    private void function announceLinkEvent(
+        required string eventName,
+        required any link,
+        required string actorType,
+        required string actorId
+    ){
+        try {
+            interceptorService.announce(
+                arguments.eventName,
+                eventPayloadBuilder.build(
+                    event          : arguments.eventName,
+                    organizationId : arguments.link.getOrganizationId() ?: "",
+                    actorType      : len( arguments.actorType ) ? arguments.actorType : "system",
+                    actorId        : len( arguments.actorId )   ? arguments.actorId   : "system",
+                    entity         : { type : "TaskTicket", id : arguments.link.getId() },
+                    metadata       : {
+                        task_id   : arguments.link.getTaskId(),
+                        ticket_id : arguments.link.getTicketId(),
+                        link_type : arguments.link.getLinkType()
+                    }
+                ),
+                false
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TaskTicketService.announceLinkEvent failed for [#arguments.eventName#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
     }
 
 }

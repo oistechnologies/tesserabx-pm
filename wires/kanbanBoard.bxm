@@ -153,6 +153,16 @@
                                         </bx:loop>
                                     </div>
                                 </bx:if>
+                                <bx:set local.tsla = local.board.slaByTask[ t.getId() ] ?: { status : "none", linkedCount : 0 } >
+                                <bx:if local.tsla.status eq "breached">
+                                    <span class="badge text-bg-danger mt-1" title="One or more linked tickets has a breached SLA">
+                                        <i class="bi bi-exclamation-octagon"></i> SLA breached
+                                    </span>
+                                <bx:elseif local.tsla.status eq "approaching">
+                                    <span class="badge text-bg-warning mt-1" title="One or more linked tickets is approaching its SLA deadline">
+                                        <i class="bi bi-clock-history"></i> SLA approaching
+                                    </span>
+                                </bx:if>
                                 <div class="d-flex gap-2 align-items-center mt-1 small text-body-secondary">
                                     <bx:if len( toString( t.getDueDate() ?: "" ) )>
                                         <span><i class="bi bi-calendar"></i> #toString( t.getDueDate() )#</span>

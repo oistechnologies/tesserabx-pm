@@ -1,0 +1,99 @@
+<bx:output>
+<bx:script>
+    local.rows     = tasks();
+    local.projects = projects();
+    local.hasLinks = arrayLen( local.rows ) > 0;
+
+    // Match the host's right-column convention: every card collapses
+    // by default so the stack stays scannable; the operator expands
+    // what they want to act on.
+    local.cardCollapsed = true;
+</bx:script>
+
+<div data-pm-wire-id="#_getID()#">
+    <bx:savecontent variable="local.body">
+        <bx:if len( notice )>
+            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-2 py-2" role="alert">
+                <span class="small">#encodeForHTML( notice )#</span>
+                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+            </div>
+        </bx:if>
+
+        <div class="d-flex justify-content-end mb-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" wire:click="toggleForm()">
+                <bx:if data.expanded><i class="bi bi-x-lg"></i> Cancel
+                <bx:else><i class="bi bi-plus-lg"></i> New task</bx:if>
+            </button>
+        </div>
+
+        <bx:if data.expanded or !local.hasLinks>
+            <form wire:submit.prevent="createTask" class="border rounded p-2 mb-2 bg-light-subtle">
+                <div class="mb-2">
+                    <label class="form-label small mb-0" for="ltp-title">Title</label>
+                    <input id="ltp-title" type="text" class="form-control form-control-sm" wire:model="newTitle" maxlength="500">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-0" for="ltp-project">Project <span class="text-danger">*</span></label>
+                    <select id="ltp-project" class="form-select form-select-sm" wire:model="newProjectId">
+                        <option value="">Choose a project...</option>
+                        <bx:loop array="#local.projects#" item="p">
+                            <option value="#encodeForHTMLAttribute( p.getId() )#">#encodeForHTML( p.getName() )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-0" for="ltp-type">Link type</label>
+                    <select id="ltp-type" class="form-select form-select-sm" wire:model="newLinkType">
+                        <option value="fixes">fixes</option>
+                        <option value="related">related</option>
+                        <option value="blocks">blocks</option>
+                    </select>
+                </div>
+                <div class="text-end">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Create &amp; link</button>
+                </div>
+            </form>
+        </bx:if>
+
+        <bx:if local.hasLinks>
+            <ul class="list-unstyled mb-0">
+                <bx:loop array="#local.rows#" item="row">
+                    <li class="pb-2 mb-2 border-bottom">
+                        <bx:if isNull( row.task )>
+                            <code class="text-body-secondary small">#encodeForHTML( row.link.getTaskId() )#</code>
+                            <span class="badge text-bg-warning ms-2">missing task</span>
+                        <bx:else>
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <a href="/agent/pm/tasks/#encodeForURL( row.task.getId() )#" class="text-decoration-none flex-grow-1">
+                                    <strong class="small">#encodeForHTML( row.task.getTitle() )#</strong>
+                                </a>
+                                <button type="button" class="btn btn-link btn-sm text-danger p-0"
+                                        wire:click="unlink('#encodeForHTMLAttribute( row.task.getId() )#')"
+                                        wire:confirm="Remove the link to this PM task? The task itself stays.">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </div>
+                            <div class="small text-body-secondary">
+                                <span class="badge text-bg-light border me-1">#encodeForHTML( row.link.getLinkType() )#</span>
+                                <bx:if len( toString( row.task.getCompletedAt() ?: "" ) )>
+                                    <span class="text-success"><i class="bi bi-check-circle"></i> completed</span>
+                                <bx:elseif len( toString( row.task.getDueDate() ?: "" ) )>
+                                    <span><i class="bi bi-calendar"></i> #toString( row.task.getDueDate() )#</span>
+                                </bx:if>
+                            </div>
+                        </bx:if>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </bx:savecontent>
+
+    #view( view = "_partials/collapsible_card", module = "core", args = {
+        id        : "linked-tasks-card",
+        title     : "Linked PM tasks",
+        badges    : [ { label : arrayLen( local.rows ), color : "secondary" } ],
+        body      : local.body,
+        collapsed : local.cardCollapsed
+    } )#
+</div>
+</bx:output>

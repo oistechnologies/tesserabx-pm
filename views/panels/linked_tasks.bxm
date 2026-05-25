@@ -4,42 +4,20 @@
     //   #view( view = local.p.partial, module = local.p.module )#
     // inside modules_app/agent/views/tickets/show.bxm with no `args`
     // struct, so we reach the ticket through `prc.ticket` directly.
-    local.ticket  = prc.ticket ?: "";
-    local.empty   = isSimpleValue( local.ticket );
-    local.linkSvc = application.wirebox.getInstance( "TaskTicketService@tesserabx-pm" );
-    local.rows    = local.empty ? [] : local.linkSvc.tasksForTicketHydrated( local.ticket.getId() );
+    // We delegate to a CBWire so the panel can offer an ad-hoc
+    // "create a PM task from this ticket" action without forcing
+    // every interaction to round-trip through the page.
+    local.ticket = prc.ticket ?: "";
 </bx:script>
 
-<bx:if arrayLen( local.rows )>
-    <bx:savecontent variable="local.body">
-        <ul class="list-unstyled mb-0">
-            <bx:loop array="#local.rows#" item="row">
-                <li class="pb-2 mb-2 border-bottom">
-                    <bx:if isNull( row.task )>
-                        <code class="text-body-secondary small">#encodeForHTML( row.link.getTaskId() )#</code>
-                        <span class="badge text-bg-warning ms-2">missing task</span>
-                    <bx:else>
-                        <a href="/agent/pm/tasks/#encodeForURL( row.task.getId() )#" class="text-decoration-none">
-                            <strong class="small">#encodeForHTML( row.task.getTitle() )#</strong>
-                        </a>
-                        <div class="small text-body-secondary">
-                            <span class="badge text-bg-light border me-1">#encodeForHTML( row.link.getLinkType() )#</span>
-                            <bx:if len( toString( row.task.getCompletedAt() ?: "" ) )>
-                                <span class="text-success"><i class="bi bi-check-circle"></i> completed</span>
-                            <bx:elseif len( toString( row.task.getDueDate() ?: "" ) )>
-                                <span><i class="bi bi-calendar"></i> #toString( row.task.getDueDate() )#</span>
-                            </bx:if>
-                        </div>
-                    </bx:if>
-                </li>
-            </bx:loop>
-        </ul>
-    </bx:savecontent>
-    #view( view = "_partials/collapsible_card", module = "core", args = {
-        id     : "linked-tasks-card",
-        title  : "Linked PM tasks",
-        badges : [ { label : arrayLen( local.rows ), color : "secondary" } ],
-        body   : local.body
-    } )#
+<bx:if !isSimpleValue( local.ticket )>
+    #wire(
+        name   = "LinkedTasksPanel@tesserabx-pm",
+        params = {
+            ticketId       : local.ticket.getId(),
+            organizationId : local.ticket.getOrganizationId() ?: "",
+            ticketSubject  : local.ticket.getSubject()        ?: ""
+        }
+    )#
 </bx:if>
 </bx:output>

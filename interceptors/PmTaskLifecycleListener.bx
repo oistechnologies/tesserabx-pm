@@ -1,0 +1,51 @@
+/**
+ * PmTaskLifecycleListener: observes onPmTaskCompleted so PM can
+ * react to completion events without coupling that logic into
+ * TaskService.
+ *
+ * Today's job is minimal: log a diagnostic when a completed task
+ * still carries linked tickets. The actual "close linked tickets?"
+ * prompt is rendered server-side on the task show page from
+ * pm_task_tickets data, so the listener is observation-only. Future
+ * phases can attach: notification fan-out, webhook dispatch for the
+ * still-open ticket count, automation triggers, etc.
+ *
+ * Listener lookup is lazy via wirebox.getInstance because ColdBox
+ * instantiates module interceptors before the per-module bindings
+ * register (same trick the Phase 4b ProjectEventLogger uses).
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onPmTaskCompleted( event, interceptData, rc, prc ){
+        try {
+            var taskId = ( arguments.interceptData.entity.id ?: "" );
+            if ( !len( taskId ) ) return;
+            var linkSvc = taskTicketService();
+            var linked  = linkSvc.ticketIdsForTask( taskId );
+            if ( !arrayLen( linked ) ) return;
+            writeLog(
+                text : "PmTaskLifecycleListener: task [#taskId#] completed with #arrayLen( linked )# linked ticket(s). UI prompt will render on next task show.",
+                log  : "tesserabx",
+                type : "info"
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "PmTaskLifecycleListener.onPmTaskCompleted failed: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private any function taskTicketService(){
+        if ( !structKeyExists( variables, "_tts" ) ) {
+            variables._tts = wirebox.getInstance( "TaskTicketService@tesserabx-pm" );
+        }
+        return variables._tts;
+    }
+
+}

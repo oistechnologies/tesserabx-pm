@@ -59,7 +59,7 @@ class {
                     "adminPages", "settings", "routeClaims",
                     "apiResources", "webhookEvents", "assets",
                     "auditEvents", "dashboardWidgets",
-                    "ticketPanels"
+                    "ticketPanels", "automationActions"
                 ],
                 requiresAi     : false,
 
@@ -294,7 +294,11 @@ class {
                     { key : "tesserabx-pm.task_completed",       label : "PM task completed" },
                     { key : "tesserabx-pm.subtask_created",      label : "PM subtask created" },
                     { key : "tesserabx-pm.subtask_completed",    label : "PM subtask completed" },
-                    { key : "tesserabx-pm.comment_added",        label : "PM comment added" }
+                    { key : "tesserabx-pm.comment_added",        label : "PM comment added" },
+                    // Phase 8b: bidirectional link lifecycle. Fired
+                    // (sync) by TaskTicketService.link / unlink.
+                    { key : "tesserabx-pm.ticket_linked",        label : "Ticket linked to a PM task" },
+                    { key : "tesserabx-pm.ticket_unlinked",      label : "Ticket unlinked from a PM task" }
                 ],
 
                 // Phase 8a: bidirectional ticket integration. The
@@ -316,7 +320,30 @@ class {
                         defaultCollapsed   : false
                     }
                 ],
-                automationActions       : [],
+                // Phase 8b: automation action. Registered via
+                // ActionRegistry@automation; the rule editor renders
+                // the parameterSchema. parameterSchema sticks to a
+                // single `name : "value"` descriptor per the storage
+                // note in EXTENSIONS.md - the rule editor's action
+                // form persists `{ type, value }`.
+                automationActions : [
+                    {
+                        id              : "tesserabx-pm.createTaskFromTicket",
+                        label           : "Create a PM task from this ticket",
+                        description     : "Creates a new PM task seeded from the ticket subject + description and links it back to the ticket with a 'fixes' relation.",
+                        executor        : "CreateTaskFromTicketExecutor@tesserabx-pm",
+                        parameterSchema : [
+                            {
+                                name        : "value",
+                                label       : "Project",
+                                type        : "string",
+                                required    : true,
+                                placeholder : "PM project UUID",
+                                description : "UUID of the PM project the task should land in. A dropdown lands once the rule editor's action form supports dynamic option providers."
+                            }
+                        ]
+                    }
+                ],
                 automationTriggers      : [],
 
                 // Phase 9: notification delivery (PM emits events
@@ -380,7 +407,10 @@ class {
             "onPmSubtaskCreated",
             "onPmSubtaskCompleted",
             "onPmCommentAdded",
-            "onPmMentioned"
+            "onPmMentioned",
+            // Phase 8b: bidirectional ticket link lifecycle.
+            "onPmTicketLinked",
+            "onPmTicketUnlinked"
         ] };
         variables.interceptors        = [
             // Phase 4b: appends to pm_project_events for every PM
@@ -393,6 +423,16 @@ class {
             {
                 class      : "#moduleMapping#.interceptors.ProjectEventLogger",
                 name       : "ProjectEventLogger",
+                properties : {}
+            },
+            // Phase 8b: observation point for onPmTaskCompleted.
+            // The actual close-on-complete prompt is data-driven on
+            // the task show page via CloseOnCompletePrompt; this
+            // listener writes diagnostic logs and is the attachment
+            // point for any future close-on-complete automation.
+            {
+                class      : "#moduleMapping#.interceptors.PmTaskLifecycleListener",
+                name       : "PmTaskLifecycleListener",
                 properties : {}
             }
         ];

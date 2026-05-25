@@ -1,0 +1,100 @@
+/**
+ * CreateTaskFromTicketExecutor: automation action that creates a PM
+ * task seeded from the triggering ticket's subject + description and
+ * links the new task back to the ticket.
+ *
+ * Registered through the manifest's `automationActions` array as
+ * `tesserabx-pm.createTaskFromTicket`. The rule editor displays the
+ * `projectId` select (host's automation surface fetches PM project
+ * options through this executor's parameter schema descriptor).
+ *
+ * ActionRegistry calls `execute( action, ticket, rule )` per the
+ * `modules_app/automation/models/actions/*Executor.bx` pattern. The
+ * `dispatch` signature shown in `sample-addons/example-sync` does
+ * NOT get invoked by the live registry; ignore it.
+ */
+class singleton=true {
+
+    property name="taskService"       inject="TaskService@tesserabx-pm";
+    property name="taskTicketService" inject="TaskTicketService@tesserabx-pm";
+    property name="projectService"    inject="ProjectService@tesserabx-pm";
+
+    public struct function execute( required struct action, required any ticket, required any rule ){
+        var params    = arguments.action.params ?: {};
+        var projectId = params.projectId ?: ( arguments.action.value ?: "" );
+        if ( !len( projectId ) ) {
+            return { ok : false, skipped : true, reason : "missing projectId parameter", action : "tesserabx-pm.createTaskFromTicket" };
+        }
+
+        var project = projectService.getProject( projectId );
+        if ( isNull( project ) ) {
+            return { ok : false, skipped : true, reason : "unknown project [" & projectId & "]", action : "tesserabx-pm.createTaskFromTicket" };
+        }
+
+        var orgId   = project.getOrganizationId();
+        var title   = arguments.ticket.getSubject() ?: ( "Ticket " & left( arguments.ticket.getId(), 8 ) );
+        var newTask = "";
+        try {
+            newTask = taskService.createTask( {
+                projectId       : projectId,
+                organizationId  : orgId,
+                title           : title,
+                description     : "Created from ticket " & arguments.ticket.getId() & " by automation rule " & ( arguments.rule.id ?: "" ),
+                priority        : ticketPriorityToPm( arguments.ticket.getPriority() ?: "" ),
+                isClientVisible : false,
+                actorType       : "system",
+                actorId         : "system"
+            } );
+        } catch ( any e ) {
+            return { ok : false, error : e.message, action : "tesserabx-pm.createTaskFromTicket", ticketId : arguments.ticket.getId() };
+        }
+
+        try {
+            taskTicketService.link( {
+                taskId         : newTask.getId(),
+                ticketId       : arguments.ticket.getId(),
+                organizationId : orgId,
+                linkType       : "fixes",
+                actorType      : "system",
+                actorId        : "system"
+            } );
+        } catch ( any e ) {
+            // The task already exists; surface the link failure but
+            // do not roll back the task itself.
+            return {
+                ok       : false,
+                error    : "Task created but link failed: " & e.message,
+                action   : "tesserabx-pm.createTaskFromTicket",
+                taskId   : newTask.getId(),
+                ticketId : arguments.ticket.getId()
+            };
+        }
+
+        return {
+            ok       : true,
+            action   : "tesserabx-pm.createTaskFromTicket",
+            taskId   : newTask.getId(),
+            ticketId : arguments.ticket.getId(),
+            linkType : "fixes"
+        };
+    }
+
+    /**
+     * Best-effort mapping between host ticket priorities and PM
+     * task priorities (the two sets do not align 1:1 because PM
+     * adds "urgent" and the host tracks numeric severities on some
+     * channels). Falls back to medium for unknowns.
+     */
+    private string function ticketPriorityToPm( required string ticketPriority ){
+        switch ( lCase( arguments.ticketPriority ) ) {
+            case "low":      return "low";
+            case "normal":   return "medium";
+            case "medium":   return "medium";
+            case "high":     return "high";
+            case "urgent":   return "urgent";
+            case "critical": return "urgent";
+            default:         return "medium";
+        }
+    }
+
+}

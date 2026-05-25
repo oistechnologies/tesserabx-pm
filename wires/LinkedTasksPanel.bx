@@ -1,0 +1,134 @@
+/**
+ * LinkedTasksPanel: ticket-side right-column panel that lists PM
+ * tasks linked to the current ticket AND offers a one-click
+ * "Create a PM task" inline form that creates a task in a chosen
+ * project and links it back to the ticket in a single action.
+ *
+ * The automation `tesserabx-pm.createTaskFromTicket` action covers
+ * rule-driven cases; this wire is the ad-hoc agent path so an
+ * operator does not have to hop to the rules editor for a one-off.
+ *
+ * Mounted from views/panels/linked_tasks.bxm (which still drops in
+ * via the host's TicketPanelRegistry render loop) with:
+ *
+ *   #wire(
+ *       name   = "LinkedTasksPanel@tesserabx-pm",
+ *       params = {
+ *           ticketId       : prc.ticket.getId(),
+ *           organizationId : prc.ticket.getOrganizationId() ?: "",
+ *           ticketSubject  : prc.ticket.getSubject()        ?: ""
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="taskTicketService" inject="TaskTicketService@tesserabx-pm";
+    property name="taskService"       inject="TaskService@tesserabx-pm";
+    property name="projectService"    inject="ProjectService@tesserabx-pm";
+    property name="auth"              inject="AuthenticationService@cbauth";
+
+    data = {
+        "ticketId"       : "",
+        "organizationId" : "",
+        "ticketSubject"  : "",
+        "expanded"       : false,
+        "newProjectId"   : "",
+        "newTitle"       : "",
+        "newLinkType"    : "fixes",
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.ticketId       = arguments.params.ticketId       ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+        data.ticketSubject  = arguments.params.ticketSubject  ?: "";
+        // Seed the new task's title with the ticket's subject so the
+        // common case is one click to create.
+        data.newTitle       = data.ticketSubject;
+    }
+
+    function tasks(){
+        if ( !len( data.ticketId ) ) return [];
+        return taskTicketService.tasksForTicketHydrated( data.ticketId );
+    }
+
+    function projects(){
+        return projectService.listProjects( includeArchived = false );
+    }
+
+    function toggleForm(){
+        data.expanded = !data.expanded;
+    }
+
+    function createTask(){
+        if ( !len( data.newProjectId ?: "" ) ) {
+            notice( "Pick a project for the new task.", "warning" );
+            return;
+        }
+        var title = trim( data.newTitle ?: "" );
+        if ( !len( title ) ) {
+            notice( "Title is required.", "warning" );
+            return;
+        }
+        try {
+            var project = projectService.getProject( data.newProjectId );
+            if ( isNull( project ) ) {
+                notice( "Unknown project.", "danger" );
+                return;
+            }
+            var orgId   = project.getOrganizationId();
+            var newTask = taskService.createTask( {
+                projectId       : project.getId(),
+                organizationId  : orgId,
+                title           : title,
+                description     : "Created from ticket " & data.ticketId & " via the linked-tasks panel.",
+                priority        : "medium",
+                isClientVisible : false,
+                actorType       : "agent",
+                actorId         : currentAgentId()
+            } );
+            taskTicketService.link( {
+                taskId         : newTask.getId(),
+                ticketId       : data.ticketId,
+                organizationId : len( data.organizationId ) ? data.organizationId : orgId,
+                linkType       : data.newLinkType ?: "fixes",
+                actorType      : "agent",
+                actorId        : currentAgentId()
+            } );
+            data.expanded     = false;
+            data.newProjectId = "";
+            data.newTitle     = data.ticketSubject;
+            data.newLinkType  = "fixes";
+            notice( "Task created and linked.", "success" );
+        } catch ( any e ) {
+            notice( "Could not create task: " & e.message, "danger" );
+        }
+    }
+
+    function unlink( taskId ){
+        try {
+            taskTicketService.unlink( arguments.taskId ?: "", data.ticketId );
+            notice( "Link removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove link: " & e.message, "danger" );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

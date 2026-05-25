@@ -38,6 +38,7 @@ class singleton=true {
 
     property name="taskService"          inject="TaskService@tesserabx-pm";
     property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="wirebox"              inject="wirebox";
 
     /**
      * Build the board state for a project. Returns a struct the
@@ -67,7 +68,8 @@ class singleton=true {
             columns      : groupTasks( tasks, statuses ),
             totalTasks   : arrayLen( tasks ),
             filters      : safeFilters,
-            labelsByTask : labelsForTasks( tasks )
+            labelsByTask : labelsForTasks( tasks ),
+            slaByTask    : slaForTasks( tasks )
         };
     }
 
@@ -100,7 +102,8 @@ class singleton=true {
             status       : isNull( status ) ? "" : status,
             tasks        : tasks,
             filters      : safeFilters,
-            labelsByTask : labelsForTasks( tasks )
+            labelsByTask : labelsForTasks( tasks ),
+            slaByTask    : slaForTasks( tasks )
         };
     }
 
@@ -168,6 +171,92 @@ class singleton=true {
             } );
         }
         return out;
+    }
+
+    /**
+     * Aggregate SLA state for every task on the board: walks
+     * pm_task_tickets for the task set in one query, asks the host
+     * `SlaService` for the worst SLA status across each task's
+     * linked tickets, and returns a struct keyed by task_id with
+     * the worst status + a count of linked tickets.
+     *
+     * Worst order: "breached" > "approaching" > "ok" > "paused" >
+     * "met" > "none". The kanban chip badges only fire on breached
+     * or approaching, so the lower statuses still bubble up but the
+     * template chooses what to render.
+     *
+     * Missing SLA module / missing tickets / per-ticket failure are
+     * silently skipped so a misconfigured installation never breaks
+     * board rendering.
+     */
+    private struct function slaForTasks( required array tasks ){
+        var out = {};
+        if ( !arrayLen( arguments.tasks ) ) return out;
+
+        var taskIds = [];
+        for ( var t in arguments.tasks ) {
+            taskIds.append( t.getId() );
+            out[ t.getId() ] = { status : "none", linkedCount : 0 };
+        }
+
+        // Pull the task->ticket map in one batch.
+        var ticketsByTask = {};
+        var ticketIds     = {};
+        var linkRows = queryExecute(
+            "SELECT task_id, ticket_id FROM pm_task_tickets WHERE task_id IN ( :tids )",
+            { tids : { value : taskIds.toList(), list : true } }
+        );
+        for ( var i = 1; i <= linkRows.recordCount; i++ ) {
+            var tid = linkRows.task_id[ i ];
+            var ticketId = linkRows.ticket_id[ i ];
+            if ( !structKeyExists( ticketsByTask, tid ) ) ticketsByTask[ tid ] = [];
+            ticketsByTask[ tid ].append( ticketId );
+            ticketIds[ ticketId ] = true;
+            out[ tid ].linkedCount += 1;
+        }
+        if ( structIsEmpty( ticketIds ) ) return out;
+
+        // Resolve the SLA service once. Missing module short-circuits.
+        var slaSvc = "";
+        try { slaSvc = wirebox.getInstance( "SlaService@sla" ); }
+        catch ( any e ) { return out; }
+        var ticketsSvc = "";
+        try { ticketsSvc = wirebox.getInstance( "TicketsService@tickets" ); }
+        catch ( any e ) { return out; }
+
+        // Walk per ticket; cache by ticket id so multiple tasks
+        // sharing the same ticket only compute once.
+        var statusByTicket = {};
+        for ( var ticketId in ticketIds ) {
+            try {
+                var ticket = ticketsSvc.getTicket( ticketId );
+                if ( isNull( ticket ) ) continue;
+                var summary = slaSvc.slaSummaryForTicket( ticket );
+                statusByTicket[ ticketId ] = summary.status ?: "none";
+            } catch ( any e ) { /* swallow per-ticket */ }
+        }
+
+        // Bubble the worst status up to each task.
+        for ( var tid in ticketsByTask ) {
+            var worst = "none";
+            for ( var ticketId in ticketsByTask[ tid ] ) {
+                var s = statusByTicket[ ticketId ] ?: "none";
+                if ( slaSeverity( s ) > slaSeverity( worst ) ) worst = s;
+            }
+            out[ tid ].status = worst;
+        }
+        return out;
+    }
+
+    private numeric function slaSeverity( required string status ){
+        switch ( arguments.status ) {
+            case "breached":    return 5;
+            case "approaching": return 4;
+            case "ok":          return 3;
+            case "paused":      return 2;
+            case "met":         return 1;
+            default:            return 0;
+        }
     }
 
     /**

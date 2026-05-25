@@ -1,0 +1,115 @@
+/**
+ * CloseOnCompletePrompt: inline modal that appears on the task show
+ * page when a task is in a completed status and has open linked
+ * tickets. Lets the agent close one or more of those tickets in one
+ * click via TicketsService.changeStatus.
+ *
+ * Data-driven rather than event-driven: the wire's `shouldShow()`
+ * helper checks the live task state every render, so the modal
+ * returns if the user reloads the page after dismissing it without
+ * acting (assuming the task is still completed). Dismissing the
+ * modal sets `data.dismissed = true` to hide it within the current
+ * page lifecycle.
+ *
+ * Embed from views/tasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "CloseOnCompletePrompt@tesserabx-pm",
+ *       params = { taskId : prc.task.getId() }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="taskService"       inject="TaskService@tesserabx-pm";
+    property name="taskTicketService" inject="TaskTicketService@tesserabx-pm";
+    property name="tickets"           inject="TicketsService@tickets";
+
+    data = {
+        "taskId"           : "",
+        "dismissed"        : false,
+        "selectedTicketIds": [],
+        "notice"           : "",
+        "noticeKind"       : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.taskId = arguments.params.taskId ?: "";
+    }
+
+    /**
+     * Pull the task + every linked ticket that is not already
+     * resolved/closed. Wire body uses this to decide whether to
+     * render the modal at all.
+     */
+    function pendingTickets(){
+        if ( !len( data.taskId ) ) return [];
+        var task = taskService.getTask( data.taskId );
+        if ( isNull( task ) ) return [];
+        if ( !len( toString( task.getCompletedAt() ?: "" ) ) ) return [];
+
+        var rows = taskTicketService.ticketsForTaskHydrated( data.taskId );
+        var out  = [];
+        for ( var r in rows ) {
+            if ( isNull( r.ticket ) ) continue;
+            var status = lCase( r.ticket.getStatus() ?: "" );
+            if ( status == "resolved" || status == "closed" ) continue;
+            out.append( r );
+        }
+        return out;
+    }
+
+    function shouldShow(){
+        if ( data.dismissed ) return false;
+        return arrayLen( pendingTickets() ) > 0;
+    }
+
+    function toggle( ticketId ){
+        var tid = arguments.ticketId ?: "";
+        if ( !len( tid ) ) return;
+        var next = duplicate( data.selectedTicketIds );
+        if ( arrayContains( next, tid ) ) arrayDelete( next, tid );
+        else                              next.append( tid );
+        data.selectedTicketIds = next;
+    }
+
+    function dismiss(){
+        data.dismissed = true;
+    }
+
+    function closeSelected(){
+        if ( !arrayLen( data.selectedTicketIds ) ) {
+            notice( "Pick at least one ticket to close.", "warning" );
+            return;
+        }
+        var closedCount = 0;
+        var failures    = [];
+        for ( var tid in data.selectedTicketIds ) {
+            try {
+                tickets.changeStatus( {
+                    ticketId   : tid,
+                    toStatus   : "closed",
+                    actorType  : "agent",
+                    actorId    : "system",
+                    note       : "Closed via PM task completion prompt."
+                } );
+                closedCount++;
+            } catch ( any e ) {
+                failures.append( "[" & left( tid, 8 ) & "...]: " & e.message );
+            }
+        }
+        data.selectedTicketIds = [];
+        if ( arrayLen( failures ) ) {
+            notice( "Closed #closedCount#; #arrayLen( failures )# failed: " & arrayToList( failures, " " ), "warning" );
+        } else {
+            notice( "Closed #closedCount# ticket(s).", "success" );
+        }
+        // Auto-dismiss once everything is acted on.
+        if ( !arrayLen( pendingTickets() ) ) data.dismissed = true;
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

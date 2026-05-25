@@ -404,6 +404,20 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( hits[ 1 ].requiredPermission ).toBe( "pm.view" );
             } );
 
+            // ---- Phase 8b: automation + ticket lifecycle events.
+
+            it( "registers the tesserabx-pm.createTaskFromTicket automation action", function(){
+                var registry = variables.wb.getInstance( "ActionRegistry@automation" );
+                var entry = registry.findById( "tesserabx-pm.createTaskFromTicket" );
+                expect( entry ).notToBeNull();
+                expect( entry.executor ).toBe( "CreateTaskFromTicketExecutor@tesserabx-pm" );
+            } );
+
+            it( "registers ticket_linked + ticket_unlinked webhookEvents", function(){
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.ticket_linked"   ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.ticket_unlinked" ) ).toBeTrue();
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.
