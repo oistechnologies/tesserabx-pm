@@ -385,6 +385,25 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( claim.action  ).toBe( "index" );
             } );
 
+            // ---- Phase 8a: ticket linking + ticket panel.
+
+            it( "binds TaskTicketService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TaskTicketService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds TaskTicketDto@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "TaskTicketDto@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the pm.linkedTasks ticket panel", function(){
+                var registry = variables.wb.getInstance( "TicketPanelRegistry@tickets" );
+                var hits = registry.listAll().filter( ( p ) => p.id == "pm.linkedTasks" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].partial            ).toBe( "panels/linked_tasks" );
+                expect( hits[ 1 ].module             ).toBe( "tesserabx-pm" );
+                expect( hits[ 1 ].requiredPermission ).toBe( "pm.view" );
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

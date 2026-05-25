@@ -1,0 +1,28 @@
+/**
+ * TaskTicketDto: snake-case shape for pm_task_tickets rows on the
+ * wire.
+ */
+class singleton=true {
+
+    public struct function fromLink( required any l ){
+        return {
+            id              : arguments.l.getId(),
+            task_id         : arguments.l.getTaskId(),
+            ticket_id       : arguments.l.getTicketId(),
+            organization_id : arguments.l.getOrganizationId() ?: "",
+            link_type       : arguments.l.getLinkType(),
+            linked_by_type  : arguments.l.getLinkedByType() ?: "",
+            linked_by_id    : arguments.l.getLinkedById()   ?: "",
+            linked_at       : isDate( arguments.l.getLinkedAt() ) ? dateTimeFormat( arguments.l.getLinkedAt(), "iso" ) : "",
+            created_at      : isDate( arguments.l.getCreatedAt() ) ? dateTimeFormat( arguments.l.getCreatedAt(), "iso" ) : "",
+            updated_at      : isDate( arguments.l.getUpdatedAt() ) ? dateTimeFormat( arguments.l.getUpdatedAt(), "iso" ) : ""
+        };
+    }
+
+    public array function fromLinkArray( required array links ){
+        var out = [];
+        for ( var l in arguments.links ) out.append( fromLink( l ) );
+        return out;
+    }
+
+}

@@ -6,6 +6,16 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 8a: Bidirectional Ticket Integration (Linking + Panels)
+
+- `TaskTicketService@tesserabx-pm` ships the link / unlink / list surface over `pm_task_tickets`. `link(data)` is idempotent via `INSERT ... ON CONFLICT (task_id, ticket_id) DO NOTHING`; `unlink(taskId, ticketId)` is a delete; `setLinkType(taskId, ticketId, linkType)` mutates an existing row. `link_type` is constrained to `related | blocks | fixes`. Linker actor (`linked_by_type` / `linked_by_id`) is recorded for audit-style queries. Organization is auto-resolved from the task when not supplied so accountless ticket links land cleanly.
+- Hydration helpers (`ticketsForTaskHydrated`, `tasksForTicketHydrated`) walk the join + delegate to `TicketsService@tickets` / PM's own `TaskService` to return `[ { link, ticket } ]` / `[ { link, task } ]` arrays the UI can render in one pass.
+- New CBWire `TaskTicketLink@tesserabx-pm` embedded on the task detail page. Lists currently-linked tickets with subject + status + clickable link-type dropdown + unlink button, plus an inline form for attaching a new ticket by id with a link-type select.
+- New ticket panel partial `views/panels/linked_tasks.bxm` registered via the manifest `ticketPanels` array. Lives in the host's ticket detail right column; read-only listing of PM tasks linked to the current ticket (writes happen on the PM task page). Resolves `TaskTicketService` from `application.wirebox` rather than DI because partials are rendered outside a wire/component DI context.
+- New DTO `TaskTicketDto@tesserabx-pm` and contract `ITaskTicketService@tesserabx-pm`. ModuleConfig gains the two bindings, the `ticketPanels` entry, and `ticketPanels` appended to `contributesTo`.
+- New test bundle `TaskTicketServiceSpec` (6 specs): create + idempotent re-link, unlink leaves the ticket and task alive, invalid link_type rejected, setLinkType updates, symmetric `ticketIdsForTask` / `taskIdsForTicket`, hydration walks to PM tasks. `InstallSpec` adds 3 new probes (TaskTicketService binding, TaskTicketDto binding, `pm.linkedTasks` registered in `TicketPanelRegistry@tickets`). 53 specs total in InstallSpec.
+- Deferred to Phase 8b: `CreateTaskFromTicketExecutor` + `TaskFromBulkTicketsExecutor` automation actions; `PmTaskLifecycleListener` close-on-complete prompt; SLA chip on the kanban TaskCard.
+
 ### Phase 7: Project Templates
 
 - `TemplateService@tesserabx-pm` ships project template CRUD plus the two big primitives: `snapshotFromProject(projectId)` walks an existing project (statuses, labels, custom fields, tasks with relative date offsets, subtasks) and returns a structured snapshot; `hydrate(data)` applies a template to a freshly-created project, recomputing dates against the new project's `start_date`. Snapshots are persisted as TEXT JSON in `pm_project_templates.structure_json`; the helper `createFromProject(data)` combines snapshot + create in one call for the admin form's primary "create from project" path.

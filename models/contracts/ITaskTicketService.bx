@@ -1,0 +1,28 @@
+/**
+ * ITaskTicketService: documentation contract for the PM <-> ticket
+ * link service.
+ *
+ * Methods (live signatures on TaskTicketService):
+ *
+ *   any   getLink( id )
+ *   any   getLinkByPair( taskId, ticketId )
+ *   array listForTask( taskId )
+ *   array listForTicket( ticketId )
+ *   array ticketIdsForTask( taskId )
+ *   array taskIdsForTicket( ticketId )
+ *   array ticketsForTaskHydrated( taskId )      -> [ { link, ticket } ]
+ *   array tasksForTicketHydrated( ticketId )    -> [ { link, task } ]
+ *   any   link( data )                          -> idempotent INSERT ON CONFLICT
+ *   void  unlink( taskId, ticketId )
+ *   any   setLinkType( taskId, ticketId, linkType )
+ */
+class {
+
+    function init(){
+        throw(
+            type    = "ITaskTicketService.DoNotInstantiate",
+            message = "ITaskTicketService is a documentation contract. Inject TaskTicketService@tesserabx-pm instead."
+        );
+    }
+
+}

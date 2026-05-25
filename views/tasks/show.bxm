@@ -80,6 +80,16 @@
 
 			<div class="mt-3">
 				#wire(
+					name   = "TaskTicketLink@tesserabx-pm",
+					params = {
+						taskId    : local.t.getId(),
+						projectId : local.project.getId()
+					}
+				)#
+			</div>
+
+			<div class="mt-3">
+				#wire(
 					name   = "TimeLogger@tesserabx-pm",
 					params = {
 						loggableType   : "task",

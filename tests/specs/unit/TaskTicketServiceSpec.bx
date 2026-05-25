@@ -1,0 +1,147 @@
+/**
+ * TaskTicketServiceSpec: link / unlink / list / setLinkType +
+ * hydration coverage.
+ *
+ * Inserts directly into the host `tickets` table rather than going
+ * through TicketsService so the test stays focused on the join
+ * surface PM owns.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "TaskTicketService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "TaskTicketService@tesserabx-pm", function(){
+
+            var fixtureOrgIds    = [];
+            var fixtureTicketIds = [];
+
+            afterEach( function( currentSpec ){
+                sleep( 200 );
+                for ( var tid in fixtureTicketIds ) {
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : tid } );
+                }
+                fixtureTicketIds = [];
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "link writes a row and is idempotent on repeat", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var tid = insertTicket( ctx.orgId, fixtureTicketIds );
+
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : tid, linkType : "related", actorType : "agent", actorId : createUUID() } );
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : tid, linkType : "related", actorType : "agent", actorId : createUUID() } );
+
+                var n = queryExecute(
+                    "SELECT COUNT(*) AS n FROM pm_task_tickets WHERE task_id = :tid AND ticket_id = :ticketId",
+                    { tid : ctx.task.getId(), ticketId : tid }
+                );
+                expect( n.n[ 1 ] ).toBe( 1 );
+            } );
+
+            it( "unlink removes the row but leaves the ticket and task intact", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var tid = insertTicket( ctx.orgId, fixtureTicketIds );
+
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : tid } );
+                variables.svc.unlink( ctx.task.getId(), tid );
+
+                expect( arrayLen( variables.svc.ticketIdsForTask( ctx.task.getId() ) ) ).toBe( 0 );
+
+                var ticketRow = queryExecute( "SELECT id FROM tickets WHERE id = :id", { id : tid } );
+                expect( ticketRow.recordCount ).toBe( 1 );
+            } );
+
+            it( "rejects an invalid link_type", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var tid = insertTicket( ctx.orgId, fixtureTicketIds );
+                expect( function(){
+                    variables.svc.link( { taskId : ctx.task.getId(), ticketId : tid, linkType : "explodes" } );
+                } ).toThrow( type = "TaskTicketService.InvalidLinkType" );
+            } );
+
+            it( "setLinkType updates the existing row", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var tid = insertTicket( ctx.orgId, fixtureTicketIds );
+
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : tid, linkType : "related" } );
+                variables.svc.setLinkType( ctx.task.getId(), tid, "blocks" );
+
+                var link = variables.svc.getLinkByPair( ctx.task.getId(), tid );
+                expect( link.getLinkType() ).toBe( "blocks" );
+            } );
+
+            it( "ticketIdsForTask and taskIdsForTicket return the symmetric view", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var t1  = insertTicket( ctx.orgId, fixtureTicketIds );
+                var t2  = insertTicket( ctx.orgId, fixtureTicketIds );
+
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : t1 } );
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : t2 } );
+
+                var ticketIds = variables.svc.ticketIdsForTask( ctx.task.getId() );
+                expect( arrayLen( ticketIds ) ).toBe( 2 );
+                expect( ticketIds ).toInclude( t1 );
+                expect( ticketIds ).toInclude( t2 );
+
+                var taskIds = variables.svc.taskIdsForTicket( t1 );
+                expect( taskIds ).toBe( [ ctx.task.getId() ] );
+            } );
+
+            it( "tasksForTicketHydrated walks the join to PM Task entities", function(){
+                var ctx = setupTask( fixtureOrgIds );
+                var tid = insertTicket( ctx.orgId, fixtureTicketIds );
+                variables.svc.link( { taskId : ctx.task.getId(), ticketId : tid, linkType : "fixes" } );
+
+                var rows = variables.svc.tasksForTicketHydrated( tid );
+                expect( arrayLen( rows ) ).toBe( 1 );
+                expect( rows[ 1 ].link.getLinkType() ).toBe( "fixes" );
+                expect( rows[ 1 ].task.getId() ).toBe( ctx.task.getId() );
+            } );
+
+        } );
+    }
+
+    private struct function setupTask( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "tt-" & createUUID(), slug : "tt-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "tt-" & createUUID() } );
+        var task    = variables.taskSvc.createTask( { projectId : project.getId(), organizationId : orgId, title : "tt-task" } );
+        return { orgId : orgId, project : project, task : task };
+    }
+
+    /**
+     * Drop a minimal host ticket row into the database. Going
+     * through TicketsService.createTicket would also work but the
+     * spec is focused on the join and the minimal columns are well-
+     * known.
+     */
+    private string function insertTicket( required string organizationId, required array fixtureTicketIds ){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO tickets
+                ( id, organization_id, subject, status, priority, created_at, updated_at )
+             VALUES
+                ( :id, :orgId, :subject, 'open', 'normal', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : id, orgId : arguments.organizationId, subject : "tt-ticket-" & createUUID() }
+        );
+        arguments.fixtureTicketIds.append( id );
+        return id;
+    }
+
+}

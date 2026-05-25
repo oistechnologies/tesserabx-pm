@@ -58,7 +58,8 @@ class {
                     "permissions", "roles", "navigation",
                     "adminPages", "settings", "routeClaims",
                     "apiResources", "webhookEvents", "assets",
-                    "auditEvents", "dashboardWidgets"
+                    "auditEvents", "dashboardWidgets",
+                    "ticketPanels"
                 ],
                 requiresAi     : false,
 
@@ -296,8 +297,25 @@ class {
                     { key : "tesserabx-pm.comment_added",        label : "PM comment added" }
                 ],
 
-                // Phase 8: bidirectional ticket integration.
-                ticketPanels            : [],
+                // Phase 8a: bidirectional ticket integration. The
+                // host's TicketPanelRegistry renders this partial on
+                // ticket detail with `args = { ticket : <entity> }`;
+                // PM's TaskTicketService walks the pm_task_tickets
+                // join to populate the list. Edits happen on the PM
+                // task detail (TaskTicketLink wire); this panel is
+                // read-only.
+                ticketPanels : [
+                    {
+                        id                 : "pm.linkedTasks",
+                        position           : "right",
+                        label              : "Linked PM tasks",
+                        partial            : "panels/linked_tasks",
+                        module             : "tesserabx-pm",
+                        sortWeight         : 500,
+                        requiredPermission : "pm.view",
+                        defaultCollapsed   : false
+                    }
+                ],
                 automationActions       : [],
                 automationTriggers      : [],
 
@@ -424,6 +442,9 @@ class {
         binder.map( "TemplateService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.TemplateService" )
               .asSingleton();
+        binder.map( "TaskTicketService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.TaskTicketService" )
+              .asSingleton();
 
         // DTOs (singleton).
         binder.map( "ProjectDto@tesserabx-pm" )
@@ -455,6 +476,9 @@ class {
               .asSingleton();
         binder.map( "TemplateDto@tesserabx-pm" )
               .to( "#moduleMapping#.models.dtos.TemplateDto" )
+              .asSingleton();
+        binder.map( "TaskTicketDto@tesserabx-pm" )
+              .to( "#moduleMapping#.models.dtos.TaskTicketDto" )
               .asSingleton();
 
         // Quick entity mappings. autoMapModels is false, so every

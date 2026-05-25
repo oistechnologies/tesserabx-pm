@@ -1,0 +1,197 @@
+/**
+ * TaskTicketService: link / unlink / list between PM tasks and host
+ * tickets.
+ *
+ * PM owns pm_task_tickets; the host `tickets` module is unaware of
+ * PM. The bidirectional surface is reads-only on the ticket side:
+ * the linked-tasks ticket panel renders PM tasks against a ticket;
+ * the linked-tickets card on the PM task show page renders tickets
+ * against a task. All writes route through this service.
+ *
+ * `link_type` is one of: related | blocks | fixes.
+ *
+ * Idempotent INSERT ... ON CONFLICT DO NOTHING on (task_id, ticket_id)
+ * so the same link cannot duplicate. `linked_by_type` / `linked_by_id`
+ * are recorded for audit-style queries from the project event log.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.VALID_LINK_TYPES   = [ "related", "blocks", "fixes" ];
+    variables.VALID_ACTOR_TYPES  = [ "agent", "contact", "system" ];
+
+    // ---------------- Reads ----------------
+
+    public any function getLink( required string id ){
+        var l = wirebox.getInstance( "TaskTicket@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( l ) ? javaCast( "null", "" ) : l;
+    }
+
+    public any function getLinkByPair( required string taskId, required string ticketId ){
+        var l = wirebox.getInstance( "TaskTicket@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "task_id",   arguments.taskId )
+            .where( "ticket_id", arguments.ticketId )
+            .first();
+        return isNull( l ) ? javaCast( "null", "" ) : l;
+    }
+
+    public array function listForTask( required string taskId ){
+        return wirebox.getInstance( "TaskTicket@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "task_id", arguments.taskId )
+            .orderBy( "linked_at", "desc" )
+            .get();
+    }
+
+    public array function listForTicket( required string ticketId ){
+        return wirebox.getInstance( "TaskTicket@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "ticket_id", arguments.ticketId )
+            .orderBy( "linked_at", "desc" )
+            .get();
+    }
+
+    public array function ticketIdsForTask( required string taskId ){
+        var rows = queryExecute(
+            "SELECT ticket_id FROM pm_task_tickets WHERE task_id = :tid",
+            { tid : arguments.taskId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.ticket_id[ i ] );
+        return out;
+    }
+
+    public array function taskIdsForTicket( required string ticketId ){
+        var rows = queryExecute(
+            "SELECT task_id FROM pm_task_tickets WHERE ticket_id = :tid",
+            { tid : arguments.ticketId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.task_id[ i ] );
+        return out;
+    }
+
+    /**
+     * Hydrate the host Ticket entities a task is linked to. Returns
+     * an array of structs `{ link : <TaskTicket>, ticket : <Ticket entity or null> }`
+     * so the UI can render the link's `link_type` alongside the
+     * ticket's subject / status without two passes.
+     */
+    public array function ticketsForTaskHydrated( required string taskId ){
+        var links = listForTask( arguments.taskId );
+        if ( !arrayLen( links ) ) return [];
+        var tickets = wirebox.getInstance( "TicketsService@tickets" );
+        var out = [];
+        for ( var l in links ) {
+            var t = "";
+            try { t = tickets.getTicket( l.getTicketId() ); }
+            catch ( any e ) { t = ""; }
+            out.append( {
+                link   : l,
+                ticket : isNull( t ) ? javaCast( "null", "" ) : t
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Hydrate the PM Task entities a ticket is linked to. Returns
+     * an array of structs `{ link : <TaskTicket>, task : <Task or null> }`
+     * with PM's own getTask service.
+     */
+    public array function tasksForTicketHydrated( required string ticketId ){
+        var links = listForTicket( arguments.ticketId );
+        if ( !arrayLen( links ) ) return [];
+        var taskSvc = wirebox.getInstance( "TaskService@tesserabx-pm" );
+        var out = [];
+        for ( var l in links ) {
+            var t = "";
+            try { t = taskSvc.getTask( l.getTaskId() ); }
+            catch ( any e ) { t = ""; }
+            out.append( {
+                link : l,
+                task : isNull( t ) ? javaCast( "null", "" ) : t
+            } );
+        }
+        return out;
+    }
+
+    // ---------------- Mutations ----------------
+
+    public any function link( required struct data ){
+        if ( !len( arguments.data.taskId   ?: "" ) ) throw( type = "TaskTicketService.MissingField", message = "taskId is required." );
+        if ( !len( arguments.data.ticketId ?: "" ) ) throw( type = "TaskTicketService.MissingField", message = "ticketId is required." );
+
+        var linkType = arguments.data.linkType ?: "related";
+        if ( !arrayContains( variables.VALID_LINK_TYPES, linkType ) ) {
+            throw( type = "TaskTicketService.InvalidLinkType", message = "linkType must be one of #arrayToList( variables.VALID_LINK_TYPES )#." );
+        }
+
+        var actorType = arguments.data.actorType ?: "system";
+        if ( !arrayContains( variables.VALID_ACTOR_TYPES, actorType ) ) {
+            throw( type = "TaskTicketService.InvalidActor", message = "actorType must be one of #arrayToList( variables.VALID_ACTOR_TYPES )#." );
+        }
+
+        // Resolve organization from the task (most reliable; the
+        // ticket may be accountless, leaving us no organization to
+        // record on the link row).
+        var orgId = arguments.data.organizationId ?: "";
+        if ( !len( orgId ) ) {
+            var tRow = queryExecute(
+                "SELECT organization_id FROM pm_tasks WHERE id = :tid",
+                { tid : arguments.data.taskId }
+            );
+            if ( tRow.recordCount ) orgId = tRow.organization_id[ 1 ] ?: "";
+        }
+
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO pm_task_tickets
+                ( id, task_id, ticket_id, organization_id, link_type,
+                  linked_by_type, linked_by_id, linked_at, created_at, updated_at )
+             VALUES
+                ( :id, :tid, :ticketId, NULLIF( :orgId, '' ), :linkType,
+                  :actorType, NULLIF( :actorId, '' ), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )
+             ON CONFLICT ( task_id, ticket_id ) DO NOTHING",
+            {
+                id        : id,
+                tid       : arguments.data.taskId,
+                ticketId  : arguments.data.ticketId,
+                orgId     : orgId,
+                linkType  : linkType,
+                actorType : actorType,
+                actorId   : arguments.data.actorId ?: ""
+            }
+        );
+
+        return getLinkByPair( arguments.data.taskId, arguments.data.ticketId );
+    }
+
+    public void function unlink( required string taskId, required string ticketId ){
+        queryExecute(
+            "DELETE FROM pm_task_tickets WHERE task_id = :tid AND ticket_id = :ticketId",
+            { tid : arguments.taskId, ticketId : arguments.ticketId }
+        );
+    }
+
+    public any function setLinkType( required string taskId, required string ticketId, required string linkType ){
+        if ( !arrayContains( variables.VALID_LINK_TYPES, arguments.linkType ) ) {
+            throw( type = "TaskTicketService.InvalidLinkType", message = "linkType must be one of #arrayToList( variables.VALID_LINK_TYPES )#." );
+        }
+        queryExecute(
+            "UPDATE pm_task_tickets
+             SET    link_type  = :lt,
+                    updated_at = CURRENT_TIMESTAMP
+             WHERE  task_id    = :tid
+               AND  ticket_id  = :ticketId",
+            { lt : arguments.linkType, tid : arguments.taskId, ticketId : arguments.ticketId }
+        );
+        return getLinkByPair( arguments.taskId, arguments.ticketId );
+    }
+
+}

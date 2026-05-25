@@ -1,0 +1,96 @@
+/**
+ * TaskTicketLink: linked-tickets card on the task detail page.
+ *
+ * Lists tickets linked to this task with subject + status, lets an
+ * agent paste a ticket id (or short ticket number once the host
+ * exposes one) and pick a link type to attach a new link, and
+ * exposes per-row unlink + link-type change.
+ *
+ * Embed from views/tasks/show.bxm with:
+ *
+ *   #wire(
+ *       name   = "TaskTicketLink@tesserabx-pm",
+ *       params = {
+ *           taskId    : prc.task.getId(),
+ *           projectId : prc.project.getId()
+ *       }
+ *   )#
+ */
+class extends="cbwire.models.Component" {
+
+    property name="taskTicketService" inject="TaskTicketService@tesserabx-pm";
+    property name="auth"              inject="AuthenticationService@cbauth";
+
+    data = {
+        "taskId"      : "",
+        "projectId"   : "",
+        "newTicketId" : "",
+        "newLinkType" : "related",
+        "notice"      : "",
+        "noticeKind"  : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.taskId    = arguments.params.taskId    ?: "";
+        data.projectId = arguments.params.projectId ?: "";
+    }
+
+    function links(){
+        if ( !len( data.taskId ) ) return [];
+        return taskTicketService.ticketsForTaskHydrated( data.taskId );
+    }
+
+    function add(){
+        var tid = trim( data.newTicketId ?: "" );
+        if ( !len( tid ) ) {
+            notice( "Enter a ticket id.", "warning" );
+            return;
+        }
+        try {
+            taskTicketService.link( {
+                taskId    : data.taskId,
+                ticketId  : tid,
+                linkType  : data.newLinkType ?: "related",
+                actorType : "agent",
+                actorId   : currentAgentId()
+            } );
+            data.newTicketId = "";
+            data.newLinkType = "related";
+            notice( "Ticket linked.", "success" );
+        } catch ( any e ) {
+            notice( "Could not link ticket: " & e.message, "danger" );
+        }
+    }
+
+    function unlink( ticketId ){
+        try {
+            taskTicketService.unlink( data.taskId, arguments.ticketId ?: "" );
+            notice( "Link removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove link: " & e.message, "danger" );
+        }
+    }
+
+    function changeType( ticketId, linkType ){
+        try {
+            taskTicketService.setLinkType( data.taskId, arguments.ticketId ?: "", arguments.linkType ?: "related" );
+        } catch ( any e ) {
+            notice( "Could not change link type: " & e.message, "danger" );
+        }
+    }
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}
