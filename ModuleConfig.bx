@@ -302,7 +302,10 @@ class {
                     { key : "tesserabx-pm.ticket_unlinked",      label : "Ticket unlinked from a PM task" },
                     // Phase 9a: mention dispatched as a webhook
                     // event so external systems can react to @-mentions.
-                    { key : "tesserabx-pm.mentioned",            label : "PM mention" }
+                    { key : "tesserabx-pm.mentioned",            label : "PM mention" },
+                    // Phase 9b: scheduled due-soon / overdue scans.
+                    { key : "tesserabx-pm.task_due_soon",        label : "PM task due soon" },
+                    { key : "tesserabx-pm.task_overdue",         label : "PM task overdue" }
                 ],
 
                 // Phase 8a: bidirectional ticket integration. The
@@ -478,6 +481,66 @@ class {
                         bodyTemplate  : "{{actorLabel}} updated the status of {{taskTitle}} in {{projectName}}.",
                         linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
                         placeholders  : [ "actorLabel", "taskTitle", "projectName", "taskId" ]
+                    },
+
+                    // ----- task due soon (Phase 9b scheduler -> assignee) -----
+                    {
+                        eventKey : "tesserabx-pm.task_due_soon", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{taskTitle}} is due soon",
+                        bodyTemplate  : "Due {{dueDate}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_due_soon", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] {{taskTitle}} due {{dueDate}}",
+                        bodyTemplate  : "Your task {{taskTitle}} in {{projectName}} is due {{dueDate}}. Open: {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_due_soon", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "{{taskTitle}} is due soon",
+                        bodyTemplate  : "Due {{dueDate}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_due_soon", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] {{taskTitle}} due {{dueDate}}",
+                        bodyTemplate  : "Your task {{taskTitle}} in {{projectName}} is due {{dueDate}}. Open: {{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+
+                    // ----- task overdue (Phase 9b scheduler -> assignee) -----
+                    {
+                        eventKey : "tesserabx-pm.task_overdue", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{taskTitle}} is overdue",
+                        bodyTemplate  : "Was due {{dueDate}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_overdue", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] {{taskTitle}} overdue",
+                        bodyTemplate  : "Your task {{taskTitle}} in {{projectName}} was due {{dueDate}} and remains open. Open: {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_overdue", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "{{taskTitle}} is overdue",
+                        bodyTemplate  : "Was due {{dueDate}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.task_overdue", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] {{taskTitle}} overdue",
+                        bodyTemplate  : "Your task {{taskTitle}} in {{projectName}} was due {{dueDate}} and remains open. Open: {{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
                     }
                 ],
 
@@ -540,7 +603,10 @@ class {
             "onPmMentioned",
             // Phase 8b: bidirectional ticket link lifecycle.
             "onPmTicketLinked",
-            "onPmTicketUnlinked"
+            "onPmTicketUnlinked",
+            // Phase 9b: scheduled scanner events.
+            "onPmTaskDueSoon",
+            "onPmTaskOverdue"
         ] };
         variables.interceptors        = [
             // Phase 4b: appends to pm_project_events for every PM
@@ -624,6 +690,9 @@ class {
               .asSingleton();
         binder.map( "TaskTicketService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.TaskTicketService" )
+              .asSingleton();
+        binder.map( "PmTaskDueScanService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.PmTaskDueScanService" )
               .asSingleton();
 
         // DTOs (singleton).

@@ -6,6 +6,19 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 9b: Scheduled Due-Soon and Overdue Notifications
+
+- `PmTaskDueScanService@tesserabx-pm` ships two pure-SQL scanners. `scanDueSoon( hoursAhead = 24 )` walks `pm_tasks` for un-completed un-deleted assigned tasks whose due date falls within the window and announces `onPmTaskDueSoon` for each. `scanOverdue()` does the same for past-due un-completed tasks (assigned or not — the dispatcher gracefully skips when assignee metadata is missing). Both fire sync canonical envelopes through `EventPayloadBuilder@core`; `PmNotificationDispatcher` translates each into a `NotificationsService.dispatchForEvent` call targeting the assignee.
+- New `pm_task_notify_state` table dedupes scanner output across runs: one row per task, `due_soon_at` / `overdue_at` timestamps mark when the scanner last fired each event. The scanner skips tasks with the matching column already set so the every-15-minute cadence does not re-notify on every run. `resetState( taskId )` (plus an operator `DELETE FROM pm_task_notify_state WHERE task_id = '...'`) re-arms a notification if the task's due date moves.
+- Schema note: the migration uses a synthetic `id` primary key plus a UNIQUE on `task_id` because qb's `.primaryKey()` on a non-`id` column generates a constraint that still references `id`. The application layer treats `task_id` as the row identity through an `INSERT ... ON CONFLICT ( task_id ) DO UPDATE` upsert in the service.
+- New PM module `config/Scheduler.bx` extending `coldbox.system.web.tasks.ColdBoxScheduler`. Two tasks register every 15 minutes:
+  - `pm:scan-due-soon` → `PmTaskDueScanService.scanDueSoon()`
+  - `pm:scan-overdue`  → `PmTaskDueScanService.scanOverdue()`
+  Both gate on `SCHEDULER_MODE=true` (matches the host's pattern in `config/Scheduler.bx`) so app + worker containers do not double-fire. Closure bodies use the block-statement form per the host's note about BoxLang's closure scope walker recursing on the single-expression form.
+- `PmNotificationDispatcher` gains listeners for `onPmTaskDueSoon` and `onPmTaskOverdue`; both target the task's assignee with the standard task context (taskTitle, projectName, dueDate, taskId).
+- Manifest deltas: `customInterceptionPoints` adds the two scanner events, `webhookEvents` adds `tesserabx-pm.task_due_soon` + `tesserabx-pm.task_overdue`, `notificationTemplates` adds 8 entries (inapp + email × agent + contact for each of the two new events).
+- New test bundle `PmTaskDueScanServiceSpec` (6 specs covering both scanners' positive + dedup + skip paths plus `resetState`). `InstallSpec` adds 3 new probes: PmTaskDueScanService binding, the two new webhook keys, and a per-tuple probe for the 8 new notification templates. 63 specs total in InstallSpec.
+
 ### Phase 9a: Notification Dispatch and Templates
 
 - `PmNotificationDispatcher` interceptor translates PM lifecycle envelopes into `NotificationsService.dispatchForEvent` calls. Listeners:

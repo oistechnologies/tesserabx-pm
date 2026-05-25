@@ -1,0 +1,167 @@
+/**
+ * PmTaskDueScanService: hourly-ish scanner that fires
+ * onPmTaskDueSoon and onPmTaskOverdue events for tasks crossing
+ * their notification thresholds.
+ *
+ * De-dup state lives in pm_task_notify_state (one row per task,
+ * timestamps for the two scan events). The scanner skips tasks
+ * already notified so the every-15-minute scheduler does not
+ * re-fire the same notification on every run. An operator can
+ * `DELETE FROM pm_task_notify_state WHERE task_id = '...'` to
+ * re-arm a notification manually if the task's due date is moved.
+ *
+ * Events fire sync via interceptorService.announce; the
+ * PmNotificationDispatcher converts them into NotificationsService
+ * dispatches.
+ *
+ * Scoping rules:
+ *   - Skip tasks with no due date (nothing to compare against).
+ *   - Skip tasks already in a completed status (completed_at set).
+ *   - Skip soft-deleted tasks.
+ *   - Skip tasks with no assignee for due-soon notifications (no
+ *     one to notify; assignment can land later and the next scan
+ *     will pick it up).
+ *
+ * Default window for due-soon is 24 hours ahead; overdue triggers
+ * the moment the due date passes.
+ */
+class singleton=true {
+
+    property name="wirebox"             inject="wirebox";
+    property name="interceptorService"  inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
+
+    /**
+     * Scan + announce onPmTaskDueSoon for every task whose due date
+     * falls within `hoursAhead` of now and which has not been
+     * notified yet. Returns the array of task ids notified.
+     */
+    public array function scanDueSoon( numeric hoursAhead = 24 ){
+        var deadline = dateAdd( "h", arguments.hoursAhead, now() );
+        var rows = queryExecute(
+            "SELECT t.id, t.organization_id, t.assignee_type, t.assignee_id, t.due_date
+             FROM   pm_tasks t
+             LEFT JOIN pm_task_notify_state s ON s.task_id = t.id
+             WHERE  t.due_date    IS NOT NULL
+               AND  t.due_date    BETWEEN :nowAt AND :deadline
+               AND  t.completed_at IS NULL
+               AND  t.deleted_at   IS NULL
+               AND  s.due_soon_at IS NULL
+               AND  t.assignee_id IS NOT NULL",
+            { nowAt : now(), deadline : deadline }
+        );
+        var notified = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var tid = rows.id[ i ];
+            try {
+                announce(
+                    eventName : "onPmTaskDueSoon",
+                    taskId    : tid,
+                    orgId     : rows.organization_id[ i ] ?: "",
+                    metadata  : {
+                        due_date       : dateTimeFormat( rows.due_date[ i ], "iso" ),
+                        assignee_type  : rows.assignee_type[ i ] ?: "",
+                        assignee_id    : rows.assignee_id[ i ]   ?: ""
+                    }
+                );
+                markNotified( tid, "due_soon_at" );
+                notified.append( tid );
+            } catch ( any e ) {
+                writeLog( text : "PmTaskDueScanService.scanDueSoon for [#tid#] failed: #e.message#", log : "tesserabx", type : "warning" );
+            }
+        }
+        return notified;
+    }
+
+    /**
+     * Scan + announce onPmTaskOverdue for every task whose due date
+     * has passed and which has not been notified yet.
+     */
+    public array function scanOverdue(){
+        var rows = queryExecute(
+            "SELECT t.id, t.organization_id, t.assignee_type, t.assignee_id, t.due_date
+             FROM   pm_tasks t
+             LEFT JOIN pm_task_notify_state s ON s.task_id = t.id
+             WHERE  t.due_date    IS NOT NULL
+               AND  t.due_date    < :nowAt
+               AND  t.completed_at IS NULL
+               AND  t.deleted_at   IS NULL
+               AND  s.overdue_at  IS NULL",
+            { nowAt : now() }
+        );
+        var notified = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var tid = rows.id[ i ];
+            try {
+                announce(
+                    eventName : "onPmTaskOverdue",
+                    taskId    : tid,
+                    orgId     : rows.organization_id[ i ] ?: "",
+                    metadata  : {
+                        due_date       : dateTimeFormat( rows.due_date[ i ], "iso" ),
+                        assignee_type  : rows.assignee_type[ i ] ?: "",
+                        assignee_id    : rows.assignee_id[ i ]   ?: ""
+                    }
+                );
+                markNotified( tid, "overdue_at" );
+                notified.append( tid );
+            } catch ( any e ) {
+                writeLog( text : "PmTaskDueScanService.scanOverdue for [#tid#] failed: #e.message#", log : "tesserabx", type : "warning" );
+            }
+        }
+        return notified;
+    }
+
+    /**
+     * Clear the dedup state for a task so the next scan re-fires
+     * the notifications. Test helpers + admin tooling use this.
+     */
+    public void function resetState( required string taskId ){
+        queryExecute(
+            "DELETE FROM pm_task_notify_state WHERE task_id = :id",
+            { id : arguments.taskId }
+        );
+    }
+
+    // ---------- internals ----------
+
+    private void function announce(
+        required string eventName,
+        required string taskId,
+        required string orgId,
+        struct metadata = {}
+    ){
+        interceptorService.announce(
+            arguments.eventName,
+            eventPayloadBuilder.build(
+                event          : arguments.eventName,
+                organizationId : arguments.orgId,
+                actorType      : "system",
+                actorId        : "system",
+                entity         : { type : "Task", id : arguments.taskId },
+                metadata       : arguments.metadata
+            ),
+            false
+        );
+    }
+
+    /**
+     * Upsert one column on pm_task_notify_state. Using ON CONFLICT
+     * lets us treat the table as a sparse state map without
+     * pre-seeding rows on task creation.
+     */
+    private void function markNotified( required string taskId, required string column ){
+        // Only two columns are supported; validate to keep raw SQL
+        // safe from injection in the dynamic column name.
+        if ( arguments.column != "due_soon_at" && arguments.column != "overdue_at" ) return;
+        queryExecute(
+            "INSERT INTO pm_task_notify_state ( id, task_id, #arguments.column#, created_at, updated_at )
+             VALUES ( :rowId, :tid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )
+             ON CONFLICT ( task_id ) DO UPDATE
+                SET #arguments.column# = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP",
+            { rowId : createUUID(), tid : arguments.taskId }
+        );
+    }
+
+}

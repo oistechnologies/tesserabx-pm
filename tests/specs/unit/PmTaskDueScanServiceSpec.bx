@@ -1,0 +1,116 @@
+/**
+ * PmTaskDueScanServiceSpec: scanDueSoon + scanOverdue + dedup state
+ * coverage. Inserts tasks with shifted due_date / completed_at /
+ * assignee_id directly so we can exercise every gate without
+ * waiting for natural time-passage.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb         = getController().getWireBox();
+        variables.svc        = variables.wb.getInstance( "PmTaskDueScanService@tesserabx-pm" );
+        variables.projectSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc    = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "PmTaskDueScanService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                sleep( 200 );
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "scanDueSoon notifies a future-but-soon assigned task once", function(){
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : 6, assigned : true );
+                var notified = variables.svc.scanDueSoon( 24 );
+                expect( arrayContains( notified, ctx.taskId ) ).toBeTrue();
+
+                var rerun = variables.svc.scanDueSoon( 24 );
+                expect( arrayContains( rerun, ctx.taskId ) ).toBeFalse( "second scan should not re-notify" );
+            } );
+
+            it( "scanDueSoon skips tasks without an assignee", function(){
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : 6, assigned : false );
+                var notified = variables.svc.scanDueSoon( 24 );
+                expect( arrayContains( notified, ctx.taskId ) ).toBeFalse();
+            } );
+
+            it( "scanDueSoon skips completed tasks", function(){
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : 6, assigned : true );
+                queryExecute(
+                    "UPDATE pm_tasks SET completed_at = CURRENT_TIMESTAMP WHERE id = :id",
+                    { id : ctx.taskId }
+                );
+                var notified = variables.svc.scanDueSoon( 24 );
+                expect( arrayContains( notified, ctx.taskId ) ).toBeFalse();
+            } );
+
+            it( "scanOverdue notifies a task with a past due date once", function(){
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : -3, assigned : true );
+                var notified = variables.svc.scanOverdue();
+                expect( arrayContains( notified, ctx.taskId ) ).toBeTrue();
+
+                var rerun = variables.svc.scanOverdue();
+                expect( arrayContains( rerun, ctx.taskId ) ).toBeFalse( "second scan should not re-notify" );
+            } );
+
+            it( "scanOverdue skips tasks not yet past due", function(){
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : 6, assigned : true );
+                var notified = variables.svc.scanOverdue();
+                expect( arrayContains( notified, ctx.taskId ) ).toBeFalse();
+            } );
+
+            it( "resetState re-arms a previously notified task", function(){
+                var ctx = setupTaskDueIn( fixtureOrgIds : fixtureOrgIds, hoursAhead : -3, assigned : true );
+                variables.svc.scanOverdue();
+                variables.svc.resetState( ctx.taskId );
+                var notified = variables.svc.scanOverdue();
+                expect( arrayContains( notified, ctx.taskId ) ).toBeTrue();
+            } );
+
+        } );
+    }
+
+    private struct function setupTaskDueIn(
+        required array fixtureOrgIds,
+        required numeric hoursAhead,
+        required boolean assigned
+    ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "scan-" & createUUID(), slug : "scan-" & createUUID() }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var project = variables.projectSvc.createProject( { organizationId : orgId, name : "scan-" & createUUID() } );
+        var taskData = {
+            projectId      : project.getId(),
+            organizationId : orgId,
+            title          : "scan-task " & createUUID()
+        };
+        if ( arguments.assigned ) {
+            taskData.assigneeType = "agent";
+            taskData.assigneeId   = createUUID();
+        }
+        var task = variables.taskSvc.createTask( taskData );
+
+        // Shift the due_date with a direct UPDATE so we can land
+        // negative offsets cleanly.
+        queryExecute(
+            "UPDATE pm_tasks SET due_date = :due WHERE id = :id",
+            { due : dateAdd( "h", arguments.hoursAhead, now() ), id : task.getId() }
+        );
+
+        return { orgId : orgId, project : project, taskId : task.getId() };
+    }
+
+}

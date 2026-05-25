@@ -118,6 +118,35 @@ class {
     function onPmTaskCompleted(     event, interceptData, rc, prc ){ taskWatcherDispatch( "tesserabx-pm.task_completed",      arguments.interceptData ); }
     function onPmTaskStatusChanged( event, interceptData, rc, prc ){ taskWatcherDispatch( "tesserabx-pm.task_status_changed", arguments.interceptData ); }
 
+    /**
+     * Phase 9b scheduler events. Both target the task's assignee
+     * (the scanner skips tasks with no assignee, so trust metadata).
+     */
+    function onPmTaskDueSoon( event, interceptData, rc, prc ){ taskAssigneeDispatch( "tesserabx-pm.task_due_soon", arguments.interceptData ); }
+    function onPmTaskOverdue( event, interceptData, rc, prc ){ taskAssigneeDispatch( "tesserabx-pm.task_overdue",  arguments.interceptData ); }
+
+    private void function taskAssigneeDispatch( required string eventKey, required struct envelope ){
+        try {
+            var e        = arguments.envelope;
+            var taskId   = e.entity.id ?: "";
+            var meta     = e.metadata    ?: {};
+            var aType    = meta.assignee_type ?: "";
+            var aId      = meta.assignee_id   ?: "";
+            if ( !len( taskId ) || !len( aType ) || !len( aId ) ) return;
+
+            var task = loadTaskRow( taskId );
+            if ( !task.recordCount ) return;
+
+            notifications().dispatchForEvent(
+                eventKey   : arguments.eventKey,
+                recipients : [ { "type" : aType, "id" : aId } ],
+                context    : taskContext( task, e )
+            );
+        } catch ( any e ) {
+            log( "taskAssigneeDispatch[" & arguments.eventKey & "]", e.message );
+        }
+    }
+
     // ---------- internals ----------
 
     private void function taskWatcherDispatch( required string eventKey, required struct envelope ){

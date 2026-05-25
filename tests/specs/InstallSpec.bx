@@ -443,6 +443,29 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( registry.findTemplate( "tesserabx-pm.task_status_changed",  "inapp", "agent"   ) ).notToBeNull();
             } );
 
+            // ---- Phase 9b: scheduled scanners + due-soon/overdue templates.
+
+            it( "binds PmTaskDueScanService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "PmTaskDueScanService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers task_due_soon + task_overdue webhookEvents", function(){
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.task_due_soon" ) ).toBeTrue();
+                expect( variables.webhookRegistry.isRegistered( "tesserabx-pm.task_overdue"  ) ).toBeTrue();
+            } );
+
+            it( "registers notificationTemplates for due-soon and overdue", function(){
+                var registry = variables.wb.getInstance( "NotificationTemplateRegistry@notifications" );
+                expect( registry.findTemplate( "tesserabx-pm.task_due_soon", "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_due_soon", "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_due_soon", "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_due_soon", "email", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_overdue",  "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_overdue",  "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_overdue",  "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.task_overdue",  "email", "contact" ) ).notToBeNull();
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

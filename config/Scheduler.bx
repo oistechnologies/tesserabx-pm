@@ -1,0 +1,60 @@
+/**
+ * PM module scheduler.
+ *
+ * ColdBox auto-discovers module schedulers at boot. Like the host's
+ * top-level scheduler, this gates registration on the SCHEDULER_MODE
+ * env var so the same job does not fire three times (once each in
+ * the app, worker, and scheduler containers). Only the scheduler
+ * container has SCHEDULER_MODE=true.
+ *
+ * Tasks:
+ *   pm:scan-due-soon  every 15 minutes -> PmTaskDueScanService.scanDueSoon
+ *   pm:scan-overdue   every 15 minutes -> PmTaskDueScanService.scanOverdue
+ *
+ * Both fire the matching onPmTask{DueSoon|Overdue} envelope per
+ * matching task; PmNotificationDispatcher converts the announce
+ * into a NotificationsService.dispatchForEvent call. De-dup state
+ * lives in pm_task_notify_state so the every-15-min cadence does
+ * not retrigger the same notification.
+ *
+ * Closure body MUST use the block-statement form `() => { ... }`,
+ * per the comment in the host's config/Scheduler.bx — the single-
+ * expression form trips BoxLang's closure scope walker into
+ * recursing indefinitely on every invocation.
+ */
+class extends="coldbox.system.web.tasks.ColdBoxScheduler" {
+
+    function configure(){
+        setTimezone( "UTC" );
+
+        var isSchedulerContainer = ( getSystemSetting( "SCHEDULER_MODE", "false" ) == "true" );
+        if ( !isSchedulerContainer ) return;
+
+        task( "pm:scan-due-soon" )
+            .call( () => {
+                getWireBox().getInstance( "PmTaskDueScanService@tesserabx-pm" ).scanDueSoon();
+            } )
+            .every( 15, "minutes" )
+            .onFailure( ( task, exception ) => {
+                writeLog(
+                    text : "pm:scan-due-soon failed: " & exception.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            } );
+
+        task( "pm:scan-overdue" )
+            .call( () => {
+                getWireBox().getInstance( "PmTaskDueScanService@tesserabx-pm" ).scanOverdue();
+            } )
+            .every( 15, "minutes" )
+            .onFailure( ( task, exception ) => {
+                writeLog(
+                    text : "pm:scan-overdue failed: " & exception.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            } );
+    }
+
+}
