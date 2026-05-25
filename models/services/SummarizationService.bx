@@ -1,0 +1,124 @@
+/**
+ * SummarizationService: one-shot comment-thread summarizer (Phase 12b).
+ *
+ * Calls `AiMiddleware.complete` with the host's documented contract
+ * shape, feature id `tesserabx-pm.summarize-thread`. Returns a struct
+ *
+ *   { outcome, summary, keyPoints[], nextStep, raw }
+ *
+ * where `outcome` mirrors AiMiddleware's "ok" / "disabled" / "error"
+ * convention. PM's UI surfaces the result inline in CommentThread
+ * when ok, hides itself when disabled, and shows a friendly error
+ * otherwise.
+ *
+ * Prompt strategy:
+ *   - System prompt declares the role (neutral summarizer).
+ *   - User prompt frames the thread (commentable label + each comment
+ *     prefixed with author label + internal/external tag) and asks
+ *     the model to respond with JSON shaped as { summary, keyPoints,
+ *     nextStep }.
+ *   - We parse the JSON via AiMiddleware.extractJsonObject, which is
+ *     tolerant of preamble / code fences (the helper KbDraftService
+ *     uses for its own JSON returns).
+ *
+ * AI-off invariant: short-circuits on `AiCapability.isEnabled()`. The
+ * "Summarize" button on CommentThread is rendered only when AI is on
+ * via the wire's own gating; this service is the second line of
+ * defense for direct callers.
+ */
+class singleton=true {
+
+    property name="aiMiddleware"  inject="AiMiddleware@ai";
+    property name="aiCapability"  inject="AiCapability@ai";
+    property name="commentSvc"    inject="CommentService@tesserabx-pm";
+    property name="wirebox"       inject="wirebox";
+
+    variables.FEATURE = "tesserabx-pm.summarize-thread";
+
+    /**
+     * Summarize the comment thread for a given commentable. Internal
+     * comments are included when an agent is asking (the typical
+     * case). Returns the canonical struct shape regardless of outcome.
+     */
+    public struct function summarizeThread(
+        required string commentableType,
+        required string commentableId,
+        struct  viewer = { accountType : "agent", accountId : "" }
+    ){
+        if ( !aiCapability.isEnabled() ) return outcome( "disabled" );
+
+        var comments = commentSvc.listForCommentable(
+            commentableType : arguments.commentableType,
+            commentableId   : arguments.commentableId,
+            viewer          : arguments.viewer
+        );
+        if ( !arrayLen( comments ) ) {
+            return outcome( "ok", { summary : "No comments on this thread yet.", keyPoints : [], nextStep : "" } );
+        }
+
+        var prompt = buildPrompt( arguments.commentableType, arguments.commentableId, comments );
+        var result = aiMiddleware.complete(
+            feature : variables.FEATURE,
+            prompt  : prompt
+        );
+        var raw = result.text ?: "";
+        if ( ( result.outcome ?: "" ) != "ok" ) {
+            return outcome( result.outcome ?: "error", { error : ( result.error ?: "AI middleware returned no text." ), raw : raw } );
+        }
+
+        var jsonStr = aiMiddleware.extractJsonObject( raw );
+        var parsed  = { summary : raw, keyPoints : [], nextStep : "" };
+        try {
+            if ( len( jsonStr ) ) {
+                var asStruct = jsonDeserialize( jsonStr );
+                if ( isStruct( asStruct ) ) {
+                    parsed.summary   = trim( asStruct.summary   ?: parsed.summary );
+                    parsed.keyPoints = isArray( asStruct.keyPoints ?: "" ) ? asStruct.keyPoints : [];
+                    parsed.nextStep  = trim( asStruct.nextStep  ?: "" );
+                }
+            }
+        } catch ( any e ) {
+            // Tolerate non-JSON; fall back to the raw text as the summary.
+        }
+        parsed.raw = raw;
+        return outcome( "ok", parsed );
+    }
+
+    // ---------- internals ----------
+
+    private struct function outcome( required string outcome, struct payload = {} ){
+        var out = {
+            outcome   : arguments.outcome,
+            summary   : "",
+            keyPoints : [],
+            nextStep  : "",
+            error     : "",
+            raw       : ""
+        };
+        structAppend( out, arguments.payload, true );
+        return out;
+    }
+
+    private string function buildPrompt(
+        required string commentableType,
+        required string commentableId,
+        required array  comments
+    ){
+        var lines = [
+            "Summarize the following " & arguments.commentableType & " comment thread.",
+            "Respond with JSON only, shaped exactly as:",
+            "{ ""summary"" : ""one short paragraph"", ""keyPoints"" : [ ""..."" ], ""nextStep"" : ""one-sentence recommended next step or empty"" }",
+            "",
+            "Thread (most recent first):"
+        ];
+        for ( var c in arguments.comments ) {
+            var who      = c.author_label ?: ( ( c.author_type ?: "" ) & ":" & left( c.author_id ?: "", 8 ) );
+            var visibility = ( c.is_internal ?: false ) ? "internal" : "external";
+            var body     = trim( c.body ?: "" );
+            if ( !len( body ) ) continue;
+            lines.append( "- [" & visibility & "] " & who & ": " & body );
+        }
+        return lines.toList( char( 10 ) );
+    }
+
+}

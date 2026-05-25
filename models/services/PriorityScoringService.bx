@@ -1,0 +1,184 @@
+/**
+ * PriorityScoringService: deterministic priority score for PM tasks.
+ *
+ * The score is a 0-100 number combining four signals (BUILD-PLAN §12,
+ * defaults agreed with Mike at phase start):
+ *
+ *   1. Base priority weight:
+ *        urgent = 40, high = 25, medium = 10, low = 5
+ *   2. Due-date pressure:
+ *        overdue        = +40
+ *        due in <= 24h  = +25
+ *        due in <= 7d   = +10
+ *        further out    = +0
+ *   3. Age-of-task bonus:
+ *        open longer than 14 days = +10
+ *   4. Capped at 100.
+ *
+ * Completed and soft-deleted tasks always score 0; the recommended-
+ * next-task widget never surfaces them.
+ *
+ * Deterministic by design: no AI involved. The widget renders the
+ * score and the breakdown at all times, regardless of AI_ENABLED.
+ * The "Explain" affordance on the widget is a separate AI feature
+ * that translates a breakdown into a one-sentence rationale and is
+ * gated independently on `AiCapability.isEnabled()`.
+ *
+ * `topForAgent` is the dashboard widget data provider; the host's
+ * dashboard renderer calls it with the signed-in agent's id and
+ * hands the result struct to the partial as `data`.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.PRIORITY_WEIGHTS = {
+        urgent : 40,
+        high   : 25,
+        medium : 10,
+        low    : 5
+    };
+
+    /**
+     * Score a single task. Pure function on Task entity fields.
+     * Returns a numeric 0-100.
+     */
+    public numeric function scoreTask( required any task ){
+        if ( !isCompletable( arguments.task ) ) return 0;
+
+        var score = priorityWeight( arguments.task.getPriority() );
+        score += dueDatePressure( arguments.task.getDueDate() ?: "" );
+        score += ageBonus( arguments.task.getCreatedAt() ?: "" );
+
+        if ( score > 100 ) score = 100;
+        if ( score < 0   ) score = 0;
+        return score;
+    }
+
+    /**
+     * Return the breakdown of a task's score as a struct, useful for
+     * the widget tooltip + the "Explain" affordance's AI context. The
+     * struct shape is stable so an explain prompt can rely on the
+     * key names.
+     */
+    public struct function scoreBreakdown( required any task ){
+        var out = {
+            taskId    : arguments.task.getId(),
+            priority  : arguments.task.getPriority() ?: "",
+            dueDate   : toString( arguments.task.getDueDate() ?: "" ),
+            createdAt : toString( arguments.task.getCreatedAt() ?: "" ),
+            base      : 0,
+            duePoints : 0,
+            agePoints : 0,
+            total     : 0,
+            reasons   : []
+        };
+        if ( !isCompletable( arguments.task ) ) {
+            out.reasons.append( "Task is completed or soft-deleted; score is 0." );
+            return out;
+        }
+        out.base      = priorityWeight( arguments.task.getPriority() );
+        out.duePoints = dueDatePressure( arguments.task.getDueDate() ?: "" );
+        out.agePoints = ageBonus( arguments.task.getCreatedAt() ?: "" );
+        out.total     = out.base + out.duePoints + out.agePoints;
+        if ( out.total > 100 ) out.total = 100;
+
+        out.reasons.append( "Priority '" & ( out.priority ?: "medium" ) & "' contributes " & out.base & " points." );
+        if ( out.duePoints > 0 ) {
+            var dueLabel = out.duePoints == 40 ? "overdue"
+                : out.duePoints == 25 ? "due within 24 hours"
+                : "due within the week";
+            out.reasons.append( "Task is " & dueLabel & "; +" & out.duePoints & "." );
+        }
+        if ( out.agePoints > 0 ) {
+            out.reasons.append( "Task has been open longer than two weeks; +" & out.agePoints & "." );
+        }
+        if ( out.total == 100 ) {
+            out.reasons.append( "Cap reached; capped at 100." );
+        }
+        return out;
+    }
+
+    /**
+     * Dashboard widget data provider. Returns the highest-scored
+     * open task assigned to the agent across every project the
+     * agent can see. Tie-breakers: due date asc, then created_at
+     * desc. Returns `{ task : null, score : 0, breakdown : null }`
+     * when the agent has no open assigned tasks.
+     */
+    public struct function topForAgent( required string agentId, string organizationId = "" ){
+        if ( !len( arguments.agentId ) ) return emptyTop();
+
+        // Pull every open, non-deleted task assigned to this agent.
+        // Scope by organization is not enforced here: agents see across
+        // their tenant boundary by the host's agent firewall model
+        // (BUILD-PLAN §3.4). Soft-delete + completed filters live in
+        // the query so we never score a closed task.
+        var query = wirebox.getInstance( "Task@tesserabx-pm" )
+            .withoutGlobalScope()
+            .where( "assignee_type", "agent" )
+            .where( "assignee_id",   arguments.agentId )
+            .whereNull( "deleted_at" )
+            .whereNull( "completed_at" )
+            .orderBy( "due_date", "asc" )
+            .orderBy( "created_at", "desc" )
+            .limit( 100 ); // walk a bounded set; the top score wins.
+
+        var rows = query.get();
+        if ( !arrayLen( rows ) ) return emptyTop();
+
+        var best      = javaCast( "null", "" );
+        var bestScore = -1;
+        for ( var t in rows ) {
+            var s = scoreTask( t );
+            if ( s > bestScore ) {
+                bestScore = s;
+                best      = t;
+            }
+        }
+        if ( bestScore <= 0 || isNull( best ) ) return emptyTop();
+
+        return {
+            task      : best,
+            score     : bestScore,
+            breakdown : scoreBreakdown( best )
+        };
+    }
+
+    // ---------- internals ----------
+
+    private struct function emptyTop(){
+        return { task : javaCast( "null", "" ), score : 0, breakdown : javaCast( "null", "" ) };
+    }
+
+    private boolean function isCompletable( required any task ){
+        var completedAt = toString( arguments.task.getCompletedAt() ?: "" );
+        if ( len( completedAt ) ) return false;
+        var deletedAt = toString( arguments.task.getDeletedAt() ?: "" );
+        if ( len( deletedAt ) ) return false;
+        return true;
+    }
+
+    private numeric function priorityWeight( string p = "" ){
+        var key = lcase( trim( arguments.p ) );
+        return variables.PRIORITY_WEIGHTS[ key ] ?: variables.PRIORITY_WEIGHTS.medium;
+    }
+
+    private numeric function dueDatePressure( any dueDate ){
+        if ( !len( toString( arguments.dueDate ) ) ) return 0;
+        var dueParsed = parseDateTime( arguments.dueDate );
+        var diffHrs   = dateDiff( "h", now(), dueParsed );
+        if ( diffHrs < 0 )     return 40;     // overdue
+        if ( diffHrs <= 24 )   return 25;     // due within 24h
+        if ( diffHrs <= 168 )  return 10;     // due within 7 days
+        return 0;
+    }
+
+    private numeric function ageBonus( any createdAt ){
+        if ( !len( toString( arguments.createdAt ) ) ) return 0;
+        var createdParsed = parseDateTime( arguments.createdAt );
+        var ageDays       = dateDiff( "d", createdParsed, now() );
+        return ageDays > 14 ? 10 : 0;
+    }
+
+}

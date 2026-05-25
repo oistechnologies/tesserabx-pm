@@ -577,8 +577,8 @@ class {
                     }
                 ],
 
-                // Phase 5: agent home dashboard widget. The host's
-                // dashboard renderer calls dataProvider.dataMethod
+                // Phase 5 + 12b: agent home dashboard widgets. The
+                // host's dashboard renderer calls dataProvider.dataMethod
                 // with the signed-in agent's id and hands the result
                 // to the partial as `data`.
                 dashboardWidgets : [
@@ -593,17 +593,34 @@ class {
                         sortWeight         : 600,
                         requiredPermission : "pm.view",
                         zone               : "agent-home"
+                    },
+                    // Phase 12b: deterministic-priority-driven "what
+                    // should I work on next" widget. The data provider
+                    // returns the highest-scored open assigned task;
+                    // the partial conditionally embeds the
+                    // PriorityExplain wire when AI is on so an
+                    // operator can ask the model to translate the
+                    // breakdown into prose.
+                    {
+                        id                 : "pm.recommendedNextTask",
+                        title              : "My recommended next task",
+                        partial            : "widgets/recommended_next_task",
+                        module             : "tesserabx-pm",
+                        dataProvider       : "PriorityScoringService@tesserabx-pm",
+                        dataMethod         : "topForAgent",
+                        defaultGridSize    : "col-12 col-md-6",
+                        sortWeight         : 700,
+                        requiredPermission : "pm.view",
+                        zone               : "agent-home"
                     }
                 ],
-                // Phase 12a: AI features. The embedding feature is
-                // the only one PM ships in 12a; 12b will add
-                // completion features (summarize / suggest /
-                // priority-explain). `requiresAi : true` is
-                // implicit on every feature registry entry; the UI
-                // contributions that surface these features carry
-                // their own `requiresAi : true` so they vanish when
+                // Phase 12a + 12b: AI features. `requiresAi : true`
+                // is implicit on every feature registry entry; the UI
+                // contributions that surface these features carry their
+                // own `requiresAi : true` so they vanish when
                 // AI_ENABLED=false.
                 aiFeatures              : [
+                    // Phase 12a: embedding.
                     {
                         id                  : "tesserabx-pm.task-embed",
                         label               : "PM task embedding",
@@ -611,6 +628,38 @@ class {
                         defaultSystemPrompt : "",
                         defaultModel        : "",
                         kind                : "embedding"
+                    },
+                    // Phase 12b: comment-thread summarization.
+                    {
+                        id                  : "tesserabx-pm.summarize-thread",
+                        label               : "Summarize a PM comment thread",
+                        description         : "Generates a short summary of a comment thread on a project, task, or subtask.",
+                        defaultSystemPrompt : "You write concise, neutral summaries of project conversations. Respond with valid JSON only.",
+                        defaultModel        : "",
+                        kind                : "completion"
+                    },
+                    // Phase 12b: assignee suggestion. v1 ranks
+                    // candidates by semantic similarity over historical
+                    // task embeddings; registering the feature keeps
+                    // the door open for an LLM ranker in v1.1.
+                    {
+                        id                  : "tesserabx-pm.suggest-assignee",
+                        label               : "Suggest a task assignee",
+                        description         : "Returns a ranked list of suggested assignees for a new task based on the project's historical assignments to similar tasks.",
+                        defaultSystemPrompt : "You suggest the most appropriate assignee from the given context.",
+                        defaultModel        : "",
+                        kind                : "completion"
+                    },
+                    // Phase 12b: priority-explain. Wraps the
+                    // PriorityScoringService breakdown in plain
+                    // English for the My-recommended-next-task widget.
+                    {
+                        id                  : "tesserabx-pm.explain-priority",
+                        label               : "Explain task priority score",
+                        description         : "Generates a one-sentence rationale for a deterministic priority score.",
+                        defaultSystemPrompt : "You explain priority scoring in plain English. Respond with a single short sentence.",
+                        defaultModel        : "",
+                        kind                : "completion"
                     }
                 ],
                 // Phase 12a: embedding consumer for PM tasks. The
@@ -790,6 +839,20 @@ class {
               .asSingleton();
         binder.map( "TaskEmbeddingConsumer@tesserabx-pm" )
               .to( "#moduleMapping#.models.ai.TaskEmbeddingConsumer" )
+              .asSingleton();
+        // Phase 12b: completion-side AI features + deterministic
+        // priority scorer. PriorityScoringService is AI-free and is
+        // the data provider for the recommended-next-task widget;
+        // SummarizationService and SuggestionService gate themselves
+        // on AiCapability.isEnabled().
+        binder.map( "PriorityScoringService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.PriorityScoringService" )
+              .asSingleton();
+        binder.map( "SummarizationService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.SummarizationService" )
+              .asSingleton();
+        binder.map( "SuggestionService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.SuggestionService" )
               .asSingleton();
 
         // DTOs (singleton).

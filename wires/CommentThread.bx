@@ -28,6 +28,8 @@
 class extends="cbwire.models.Component" {
 
     property name="commentService" inject="CommentService@tesserabx-pm";
+    property name="summarization"  inject="SummarizationService@tesserabx-pm";
+    property name="aiCapability"   inject="AiCapability@ai";
     property name="auth"           inject="AuthenticationService@cbauth";
 
     data = {
@@ -37,7 +39,13 @@ class extends="cbwire.models.Component" {
         "body"            : "",
         "isInternal"      : true,
         "notice"          : "",
-        "noticeKind"      : "info"
+        "noticeKind"      : "info",
+        // Phase 12b summarize-thread state.
+        "summary"         : "",
+        "summaryPoints"   : [],
+        "summaryNextStep" : "",
+        "summaryError"    : "",
+        "summarizing"     : false
     };
 
     // ---------------- Lifecycle ----------------
@@ -115,6 +123,58 @@ class extends="cbwire.models.Component" {
             notice( "Comment deleted.", "info" );
         } catch ( any e ) {
             notice( "Could not delete: " & e.message, "danger" );
+        }
+    }
+
+    /**
+     * Phase 12b: summarize this thread via SummarizationService.
+     * AI-off-safe (the service short-circuits), but the button itself
+     * is only rendered in the template when AI is on so the action
+     * should not normally fire on a disabled environment.
+     */
+    function summarizeThread(){
+        if ( !len( data.commentableType ) || !len( data.commentableId ) ) return;
+        data.summarizing     = true;
+        data.summary         = "";
+        data.summaryPoints   = [];
+        data.summaryNextStep = "";
+        data.summaryError    = "";
+        try {
+            var result = summarization.summarizeThread(
+                commentableType : data.commentableType,
+                commentableId   : data.commentableId,
+                viewer          : viewer()
+            );
+            if ( ( result.outcome ?: "" ) != "ok" ) {
+                data.summaryError = "Summary unavailable right now (" & ( result.outcome ?: "error" ) & ").";
+            } else {
+                data.summary         = result.summary ?: "";
+                data.summaryPoints   = result.keyPoints ?: [];
+                data.summaryNextStep = result.nextStep ?: "";
+            }
+        } catch ( any e ) {
+            data.summaryError = "Summary failed: " & e.message;
+        }
+        data.summarizing = false;
+    }
+
+    function clearSummary(){
+        data.summary         = "";
+        data.summaryPoints   = [];
+        data.summaryNextStep = "";
+        data.summaryError    = "";
+    }
+
+    /**
+     * Used by the template to decide whether to render the Summarize
+     * button. AI-off invariant: when AI is disabled, the button is
+     * absent.
+     */
+    function aiEnabled(){
+        try {
+            return !!aiCapability.isEnabled();
+        } catch ( any e ) {
+            return false;
         }
     }
 

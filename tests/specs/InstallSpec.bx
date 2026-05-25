@@ -554,6 +554,37 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( claim.action  ).toBe( "run" );
             } );
 
+            // ---- Phase 12b: AI completion features + recommended-next-task widget.
+
+            it( "binds PriorityScoringService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "PriorityScoringService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds SummarizationService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SummarizationService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds SuggestionService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "SuggestionService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "registers the three Phase 12b AI completion features", function(){
+                expect( variables.aiFeatureRegistry.findById( "tesserabx-pm.summarize-thread" ) ).notToBeNull();
+                expect( variables.aiFeatureRegistry.findById( "tesserabx-pm.suggest-assignee" ) ).notToBeNull();
+                expect( variables.aiFeatureRegistry.findById( "tesserabx-pm.explain-priority" ) ).notToBeNull();
+                expect( variables.aiFeatureRegistry.findById( "tesserabx-pm.summarize-thread" ).kind ).toBe( "completion" );
+                expect( variables.aiFeatureRegistry.findById( "tesserabx-pm.explain-priority" ).kind ).toBe( "completion" );
+            } );
+
+            it( "registers the pm.recommendedNextTask dashboard widget", function(){
+                var ids = variables.widgetRegistry.listAll().map( ( w ) => w.id );
+                expect( ids ).toInclude( "pm.recommendedNextTask" );
+                var hits = variables.widgetRegistry.listAll().filter( ( w ) => w.id == "pm.recommendedNextTask" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].dataProvider ).toBe( "PriorityScoringService@tesserabx-pm" );
+                expect( hits[ 1 ].dataMethod   ).toBe( "topForAgent" );
+            } );
+
             // Phase 2+ probes are appended below as registries are
             // populated. The shape mirrors the example-sync spec:
             // one `it()` per (registry, contribution kind) pair.

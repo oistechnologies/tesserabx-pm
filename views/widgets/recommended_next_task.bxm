@@ -1,0 +1,46 @@
+<bx:output>
+<bx:script>
+    // Host dashboard renderer hands the dataProvider result here as `data`.
+    // Shape: { task : Task | null, score : numeric, breakdown : struct | null }.
+    local.d         = data ?: { task : javaCast( "null", "" ), score : 0, breakdown : javaCast( "null", "" ) };
+    local.hasTask   = !isNull( local.d.task ?: javaCast( "null", "" ) );
+    local.aiOn      = false;
+    try {
+        local.aiOn = getInstance( dsl : "AiCapability@ai" ).isEnabled();
+    } catch ( any e ) {
+        local.aiOn = false;
+    }
+</bx:script>
+
+<div class="card h-100">
+<div class="card-body">
+<h2 class="h6 mb-2 text-body-secondary"><i class="bi bi-flag"></i> My recommended next task</h2>
+<bx:if local.hasTask>
+<bx:set local.t = local.d.task >
+<bx:set local.b = local.d.breakdown >
+<a href="/agent/pm/tasks/#encodeForURL( local.t.getId() )#" class="text-decoration-none">
+<strong>#encodeForHTML( local.t.getTitle() )#</strong>
+</a>
+<div class="mt-1 mb-2">
+<span class="badge text-bg-dark">#local.d.score#/100</span>
+<bx:if len( local.t.getPriority() ?: "" )>
+<span class="badge text-bg-light border">#encodeForHTML( local.t.getPriority() )#</span>
+</bx:if>
+<bx:if len( toString( local.t.getDueDate() ?: "" ) )>
+<span class="badge text-bg-light border">due #toString( local.t.getDueDate() )#</span>
+</bx:if>
+</div>
+<ul class="list-unstyled small text-body-secondary mb-2">
+<bx:loop array="#( local.b.reasons ?: [] )#" item="r">
+<li>&bull; #encodeForHTML( r )#</li>
+</bx:loop>
+</ul>
+<bx:if local.aiOn>
+#wire( name = "PriorityExplain@tesserabx-pm", params = { taskId : local.t.getId() } )#
+</bx:if>
+<bx:else>
+<p class="text-body-secondary mb-0 fst-italic small">Nothing assigned yet. New tasks you are assigned to will surface here.</p>
+</bx:if>
+</div>
+</div>
+</bx:output>

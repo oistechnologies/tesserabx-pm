@@ -8,7 +8,36 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-2">
             <h2 class="h5 mb-0">Comments <span class="badge text-bg-secondary">#arrayLen( local.comments )#</span></h2>
+            <bx:if aiEnabled() and arrayLen( local.comments )>
+                <button type="button" class="btn btn-sm btn-outline-primary" wire:click="summarizeThread" <bx:if data.summarizing>disabled</bx:if>>
+                    <bx:if data.summarizing><i class="bi bi-hourglass-split"></i> Summarizing...<bx:else><i class="bi bi-stars"></i> Summarize</bx:if>
+                </button>
+            </bx:if>
         </div>
+
+        <bx:if len( data.summary ) or len( data.summaryError )>
+            <div class="alert alert-light border mb-3">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <strong class="small"><i class="bi bi-stars"></i> Thread summary</strong>
+                    <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="clearSummary"></button>
+                </div>
+                <bx:if len( data.summaryError )>
+                    <div class="small text-warning mt-1">#encodeForHTML( data.summaryError )#</div>
+                <bx:else>
+                    <p class="small mb-1 mt-1">#encodeForHTML( data.summary )#</p>
+                    <bx:if arrayLen( data.summaryPoints )>
+                        <ul class="small mb-1">
+                            <bx:loop array="#data.summaryPoints#" item="kp">
+                                <li>#encodeForHTML( kp )#</li>
+                            </bx:loop>
+                        </ul>
+                    </bx:if>
+                    <bx:if len( data.summaryNextStep )>
+                        <div class="small text-body-secondary mb-0"><strong>Next step:</strong> #encodeForHTML( data.summaryNextStep )#</div>
+                    </bx:if>
+                </bx:if>
+            </div>
+        </bx:if>
 
         <bx:if len( notice )>
             <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">

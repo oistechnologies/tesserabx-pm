@@ -1,0 +1,211 @@
+/**
+ * SuggestionService: history-driven assignee + label suggestions
+ * (Phase 12b).
+ *
+ * v1 strategy: semantic similarity over the embedding index we just
+ * built in 12a, scoped to the same project. Given a task title +
+ * description, we ask `SimilarityService.findSimilarToText` for the
+ * top-N similar tasks in the same project, then aggregate:
+ *
+ *   - Assignees: count occurrences of each (assignee_type, assignee_id)
+ *     across the similar tasks; rank by count + max similarity score.
+ *   - Labels: count label_id occurrences across the similar tasks'
+ *     pm_task_labels rows; same ranking shape.
+ *
+ * No LLM call. The reasoning is: if "team prefers Alice for auth bugs"
+ * is implicit in the historical assignment pattern, the embedding
+ * neighborhood will surface it without spending tokens. The manifest
+ * registers `tesserabx-pm.suggest-assignee` as an AI feature anyway
+ * because (a) suggestions are only available when AI is on
+ * (embeddings require AI) and (b) a future v1.1 variant could plug
+ * an LLM ranker in front without changing the UI.
+ *
+ * AI-off invariant: SimilarityService already short-circuits on
+ * `AiCapability.isEnabled()`; an empty similar-task list yields an
+ * empty suggestion list. The UI surfaces gate `requiresAi : true`
+ * so the Suggest buttons vanish when AI is off.
+ *
+ * Sparse-data invariant: if the project has no similar tasks (a
+ * brand-new project or a wholly unique title), the lists return
+ * empty. Callers render an empty-state instead of erroring.
+ */
+class singleton=true {
+
+    property name="similarityService" inject="SimilarityService@tesserabx-pm";
+    property name="aiCapability"      inject="AiCapability@ai";
+    property name="wirebox"           inject="wirebox";
+
+    variables.NEIGHBORHOOD = 10; // similar tasks to aggregate over
+
+    /**
+     * Return up to `limit` suggested assignees for a candidate task.
+     * Returns an array of structs:
+     *   { assignee_type, assignee_id, label, count, max_similarity }
+     * `label` is the resolved Agent / Contact display name (or a
+     * "type:short-id" fallback when the account lookup fails).
+     */
+    public array function suggestAssignees(
+        required string  taskTitle,
+        string  taskDescription = "",
+        required string  projectId,
+        numeric limit           = 3
+    ){
+        if ( !aiCapability.isEnabled() ) return [];
+        if ( !len( trim( arguments.taskTitle & " " & arguments.taskDescription ) ) ) return [];
+
+        var text     = trim( arguments.taskTitle ) & ( len( trim( arguments.taskDescription ) ) ? ( char( 10 ) & char( 10 ) & trim( arguments.taskDescription ) ) : "" );
+        var similar  = similarityService.findSimilarToText(
+            text      : text,
+            limit     : variables.NEIGHBORHOOD,
+            projectId : arguments.projectId
+        );
+        if ( !arrayLen( similar ) ) return [];
+
+        var ids = similar.map( ( s ) => s.id );
+        var rows = queryExecute(
+            "SELECT id, assignee_type, assignee_id
+             FROM   pm_tasks
+             WHERE  id IN ( :ids )
+               AND  assignee_id IS NOT NULL
+               AND  assignee_id <> ''
+               AND  deleted_at IS NULL",
+            { ids : { value : ids.toList(), list : true, cfsqltype : "varchar" } }
+        );
+
+        // Pre-index distance per source id so we can compute a
+        // similarity-weighted score.
+        var distById = {};
+        for ( var s in similar ) distById[ s.id ] = s.distance ?: 1;
+
+        var buckets = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var sid    = rows.id[ i ];
+            var atype  = rows.assignee_type[ i ];
+            var aid    = rows.assignee_id[ i ];
+            var key    = atype & ":" & aid;
+            var dist   = distById[ sid ] ?: 1;
+            var sim    = 1 - ( dist / 2 );
+            if ( !structKeyExists( buckets, key ) ) {
+                buckets[ key ] = {
+                    assignee_type  : atype,
+                    assignee_id    : aid,
+                    count          : 0,
+                    max_similarity : 0
+                };
+            }
+            buckets[ key ].count++;
+            if ( sim > buckets[ key ].max_similarity ) buckets[ key ].max_similarity = sim;
+        }
+
+        var ranked = [];
+        for ( var k in buckets ) ranked.append( buckets[ k ] );
+        ranked.sort( function( a, b ){
+            if ( a.count != b.count ) return b.count - a.count;
+            return b.max_similarity > a.max_similarity ? 1 : ( b.max_similarity < a.max_similarity ? -1 : 0 );
+        } );
+
+        var out = [];
+        var keep = arguments.limit;
+        for ( var i = 1; i <= arrayLen( ranked ); i++ ) {
+            if ( arrayLen( out ) >= keep ) break;
+            var b = ranked[ i ];
+            b.label = resolveAccountLabel( b.assignee_type, b.assignee_id );
+            out.append( b );
+        }
+        return out;
+    }
+
+    /**
+     * Return up to `limit` suggested labels for a candidate task.
+     * Returns an array of:
+     *   { label_id, name, color, count, max_similarity }.
+     */
+    public array function suggestLabels(
+        required string  taskTitle,
+        string  taskDescription = "",
+        required string  projectId,
+        numeric limit           = 5
+    ){
+        if ( !aiCapability.isEnabled() ) return [];
+        if ( !len( trim( arguments.taskTitle & " " & arguments.taskDescription ) ) ) return [];
+
+        var text    = trim( arguments.taskTitle ) & ( len( trim( arguments.taskDescription ) ) ? ( char( 10 ) & char( 10 ) & trim( arguments.taskDescription ) ) : "" );
+        var similar = similarityService.findSimilarToText(
+            text      : text,
+            limit     : variables.NEIGHBORHOOD,
+            projectId : arguments.projectId
+        );
+        if ( !arrayLen( similar ) ) return [];
+
+        var ids = similar.map( ( s ) => s.id );
+        var rows = queryExecute(
+            "SELECT tl.task_id, tl.label_id, l.name, l.color
+             FROM   pm_task_labels tl
+             JOIN   pm_labels l ON l.id = tl.label_id
+             WHERE  tl.task_id IN ( :ids )
+               AND  l.deleted_at IS NULL",
+            { ids : { value : ids.toList(), list : true, cfsqltype : "varchar" } }
+        );
+
+        var distById = {};
+        for ( var s in similar ) distById[ s.id ] = s.distance ?: 1;
+
+        var buckets = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var lid  = rows.label_id[ i ];
+            var sid  = rows.task_id[ i ];
+            var dist = distById[ sid ] ?: 1;
+            var sim  = 1 - ( dist / 2 );
+            if ( !structKeyExists( buckets, lid ) ) {
+                buckets[ lid ] = {
+                    label_id       : lid,
+                    name           : rows.name[ i ],
+                    color          : rows.color[ i ] ?: "",
+                    count          : 0,
+                    max_similarity : 0
+                };
+            }
+            buckets[ lid ].count++;
+            if ( sim > buckets[ lid ].max_similarity ) buckets[ lid ].max_similarity = sim;
+        }
+
+        var ranked = [];
+        for ( var k in buckets ) ranked.append( buckets[ k ] );
+        ranked.sort( function( a, b ){
+            if ( a.count != b.count ) return b.count - a.count;
+            return b.max_similarity > a.max_similarity ? 1 : ( b.max_similarity < a.max_similarity ? -1 : 0 );
+        } );
+
+        var out = [];
+        var keep = arguments.limit;
+        for ( var i = 1; i <= arrayLen( ranked ); i++ ) {
+            if ( arrayLen( out ) >= keep ) break;
+            out.append( ranked[ i ] );
+        }
+        return out;
+    }
+
+    // ---------- internals ----------
+
+    private string function resolveAccountLabel( required string accountType, required string accountId ){
+        if ( !len( arguments.accountId ) ) return "(unassigned)";
+        var table = arguments.accountType == "agent" ? "agents" : "contacts";
+        try {
+            var rows = queryExecute(
+                "SELECT first_name, last_name, email FROM " & table & " WHERE id = :id",
+                { id : arguments.accountId }
+            );
+            if ( !rows.recordCount ) return arguments.accountType & ":" & left( arguments.accountId, 8 );
+            var first = rows.first_name[ 1 ] ?: "";
+            var last  = rows.last_name[ 1 ]  ?: "";
+            var email = rows.email[ 1 ]      ?: "";
+            var name  = trim( first & " " & last );
+            if ( len( name ) ) return name;
+            if ( len( email ) ) return email;
+            return arguments.accountType & ":" & left( arguments.accountId, 8 );
+        } catch ( any e ) {
+            return arguments.accountType & ":" & left( arguments.accountId, 8 );
+        }
+    }
+
+}

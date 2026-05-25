@@ -1,0 +1,15 @@
+<bx:output>
+<div data-pm-wire-id="#_getID()#" class="mt-2">
+<bx:if !len( data.text ) and !len( data.error )>
+<button type="button" class="btn btn-sm btn-outline-primary" wire:click="runExplain" <bx:if data.loading>disabled</bx:if>>
+<bx:if data.loading><i class="bi bi-hourglass-split"></i> Thinking...<bx:else><i class="bi bi-stars"></i> Explain</bx:if>
+</button>
+</bx:if>
+<bx:if len( data.text )>
+<div class="alert alert-light border small mb-0 mt-1">#encodeForHTML( data.text )#</div>
+</bx:if>
+<bx:if len( data.error )>
+<div class="alert alert-warning small mb-0 mt-1">#encodeForHTML( data.error )#</div>
+</bx:if>
+</div>
+</bx:output>

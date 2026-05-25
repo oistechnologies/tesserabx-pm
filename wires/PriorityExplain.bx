@@ -1,0 +1,98 @@
+/**
+ * PriorityExplain: AI Explain affordance on the "My recommended next
+ * task" dashboard widget. Lives entirely inside the widget partial.
+ *
+ * Mount params:
+ *   taskId  : string — the task whose score we will explain
+ *
+ * State:
+ *   loading : boolean
+ *   text    : the AI-generated explanation
+ *   error   : an error message if the explain failed
+ *
+ * Flow:
+ *   - On mount the wire renders just the trigger button.
+ *   - Clicking Explain calls `runExplain()` which builds a prompt from
+ *     `PriorityScoringService.scoreBreakdown` and calls
+ *     `AiMiddleware.complete` with feature `tesserabx-pm.explain-priority`.
+ *   - The result is rendered inline below the button.
+ *
+ * AI-off invariant:
+ *   The widget partial only embeds this wire when `AiCapability.isEnabled()`
+ *   so this wire never mounts in an AI-off environment. The action
+ *   itself short-circuits as a second line of defence.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="scoring"        inject="PriorityScoringService@tesserabx-pm";
+    property name="aiMiddleware"   inject="AiMiddleware@ai";
+    property name="aiCapability"   inject="AiCapability@ai";
+    property name="wirebox"        inject="wirebox";
+
+    data = {
+        "taskId"  : "",
+        "loading" : false,
+        "text"    : "",
+        "error"   : ""
+    };
+
+    function onMount( required struct params = {} ){
+        data.taskId = arguments.params.taskId ?: "";
+    }
+
+    function runExplain(){
+        if ( !len( data.taskId ) ) {
+            data.error = "No task bound.";
+            return;
+        }
+        if ( !aiCapability.isEnabled() ) {
+            data.error = "AI is disabled.";
+            return;
+        }
+        data.loading = true;
+        data.error   = "";
+        data.text    = "";
+
+        try {
+            var task = wirebox.getInstance( "Task@tesserabx-pm" )
+                .withoutGlobalScope()
+                .where( "id", data.taskId )
+                .first();
+            if ( isNull( task ) ) {
+                data.error = "Task not found.";
+                data.loading = false;
+                return;
+            }
+            var breakdown = scoring.scoreBreakdown( task );
+            var prompt    = buildPrompt( task.getTitle() ?: "", breakdown );
+            var result    = aiMiddleware.complete(
+                feature : "tesserabx-pm.explain-priority",
+                prompt  : prompt
+            );
+            if ( ( result.outcome ?: "" ) != "ok" ) {
+                data.error = "Explain unavailable right now (" & ( result.outcome ?: "error" ) & ").";
+            } else {
+                data.text = trim( result.text ?: "" );
+            }
+        } catch ( any e ) {
+            data.error = "Explain failed: " & e.message;
+        }
+        data.loading = false;
+    }
+
+    private string function buildPrompt( required string taskTitle, required struct breakdown ){
+        var lines = [
+            "A task has been scored on a 0-100 priority scale using a deterministic formula.",
+            "Write a single short sentence explaining the score in plain English.",
+            "",
+            "Task: " & arguments.taskTitle,
+            "Score: " & arguments.breakdown.total & " / 100",
+            "Priority weight: " & arguments.breakdown.base,
+            "Due-date pressure: " & arguments.breakdown.duePoints,
+            "Age bonus: " & arguments.breakdown.agePoints,
+            "Reasons: " & arrayToList( arguments.breakdown.reasons, " " )
+        ];
+        return lines.toList( char( 10 ) );
+    }
+
+}
