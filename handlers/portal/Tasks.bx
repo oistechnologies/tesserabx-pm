@@ -10,6 +10,7 @@ class {
 
     property name="taskService"       inject="TaskService@tesserabx-pm";
     property name="commentService"    inject="CommentService@tesserabx-pm";
+    property name="watcherService"    inject="WatcherService@tesserabx-pm";
     property name="visibilityService" inject="VisibilityService@tesserabx-pm";
     property name="auth"              inject="AuthenticationService@cbauth";
     property name="messagebox"        inject="messagebox@cbmessagebox";
@@ -46,7 +47,50 @@ class {
             commentableId   : task.getId(),
             viewer          : viewer
         );
+        prc.isWatching = watcherService.isWatching(
+            "task", task.getId(), viewer.accountType, viewer.accountId
+        );
         event.setView( view = "portal/tasks/show", module = "tesserabx-pm" );
+    }
+
+    /**
+     * Phase 13b: portal-side Watch / Unwatch toggle. Contacts can
+     * subscribe to a task they can already see. WatcherService is
+     * polymorphic so the same code path the agent uses applies here;
+     * visibility is enforced first to keep contacts out of tasks they
+     * cannot view.
+     */
+    function toggleWatch( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var task = taskService.getTask( rc.id ?: "" );
+        if ( isNull( task ) ) {
+            messagebox.warn( "That task is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+        var viewer = viewerStruct( me );
+        if ( !visibilityService.canViewTask( viewer, task ) ) {
+            messagebox.warn( "That task is not available." );
+            relocate( uri = "/pm/projects" );
+            return;
+        }
+        try {
+            var nowWatching = watcherService.toggle(
+                "task",
+                task.getId(),
+                task.getOrganizationId(),
+                viewer.accountType,
+                viewer.accountId
+            );
+            messagebox.info( nowWatching ? "Now watching." : "Stopped watching." );
+        } catch ( any e ) {
+            messagebox.error( "Could not change watch state: " & e.message );
+        }
+        relocate( uri = "/pm/tasks/" & task.getId() );
     }
 
     function postComment( event, rc, prc ){

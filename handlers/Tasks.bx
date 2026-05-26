@@ -27,6 +27,8 @@ class {
     property name="boardService"         inject="BoardService@tesserabx-pm";
     property name="contactsService"      inject="ContactsService@contacts";
     property name="accountLookup"        inject="AccountLookupService@tesserabx-pm";
+    property name="suggestionService"    inject="SuggestionService@tesserabx-pm";
+    property name="aiCapability"         inject="AiCapability@ai";
     property name="messagebox"           inject="messagebox@cbmessagebox";
     property name="auth"                 inject="AuthenticationService@cbauth";
 
@@ -209,8 +211,26 @@ class {
         prc.formData         = taskToFormData( task );
         prc.assigneeAgents   = accountLookup.listAgents();
         prc.assigneeContacts = accountLookup.listContactsForOrganization( project.getOrganizationId() );
+        prc.suggestedAssignees = safeSuggestAssignees( task, project );
         prc.formErrors = prc.formErrors ?: [];
         event.setView( view = "tasks/edit", module = "tesserabx-pm" );
+    }
+
+    private array function safeSuggestAssignees( required any task, required any project ){
+        // Phase 13b: only attempt the embedding-backed suggestions when
+        // AI is on; the service short-circuits internally but skipping
+        // the call when off avoids a wasted query.
+        try {
+            if ( !aiCapability.isEnabled() ) return [];
+            return suggestionService.suggestAssignees(
+                taskTitle       : arguments.task.getTitle() ?: "",
+                taskDescription : arguments.task.getDescription() ?: "",
+                projectId       : arguments.project.getId(),
+                limit           : 3
+            );
+        } catch ( any e ) {
+            return [];
+        }
     }
 
     function update( event, rc, prc ){

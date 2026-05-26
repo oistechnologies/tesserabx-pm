@@ -91,6 +91,18 @@
 							</optgroup>
 						</bx:if>
 					</select>
+					<bx:if arrayLen( prc.suggestedAssignees ?: [] )>
+						<div class="form-text small mt-1">
+							<i class="bi bi-stars"></i> Suggested:
+							<bx:loop array="#prc.suggestedAssignees#" item="sg">
+								<button type="button" class="btn btn-sm btn-link p-0 me-1 align-baseline"
+										onclick="document.getElementById('assigneeChoice').value='#encodeForHTMLAttribute( sg.assignee_type )#:#encodeForHTMLAttribute( sg.assignee_id )#'">
+									#encodeForHTML( sg.label )#
+								</button>
+							</bx:loop>
+							<span class="text-body-secondary">(based on similar past tasks in this project)</span>
+						</div>
+					</bx:if>
 				</div>
 				<div class="col-12">
 					<div class="form-check">

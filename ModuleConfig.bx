@@ -172,6 +172,8 @@ class {
                     { path : "/pm/projects/:id",     verbs : "GET",  module : "tesserabx-pm", handler : "portal.Projects", action : "show"  },
                     { path : "/pm/tasks/:id",        verbs : "GET",  module : "tesserabx-pm", handler : "portal.Tasks",    action : "show"  },
                     { path : "/pm/tasks/:id/comment",verbs : "POST", module : "tesserabx-pm", handler : "portal.Tasks",    action : "postComment" },
+                    // Phase 13b: portal-side watch toggle.
+                    { path : "/pm/tasks/:id/watch",  verbs : "POST", module : "tesserabx-pm", handler : "portal.Tasks",    action : "toggleWatch" },
 
                     // REST API — Projects.
                     { path : "/api/v1/pm/projects",              verbs : "GET",    module : "tesserabx-pm", handler : "api.v1.Projects", action : "index"   },

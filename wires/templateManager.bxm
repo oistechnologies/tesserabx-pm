@@ -97,12 +97,12 @@
                                         </div>
                                     </div>
                                     <div class="d-flex gap-1">
-                                        <button class="btn btn-link btn-sm p-0" wire:click="togglePreview('#encodeForHTMLAttribute( t.getId() )#')" title="<bx:if data.previewId eq t.getId()>Hide preview<bx:else>Preview structure</bx:if>">
-                                            <bx:if data.previewId eq t.getId()><i class="bi bi-eye-slash"></i><bx:else><i class="bi bi-eye"></i></bx:if>
+                                        <button class="btn btn-link btn-sm p-0" wire:click="togglePreview('#encodeForHTMLAttribute( t.getId() )#')" title="<bx:if data.previewId eq t.getId()>Hide preview<bx:else>Preview structure</bx:if>" aria-label="<bx:if data.previewId eq t.getId()>Hide template preview<bx:else>Preview template structure</bx:if>">
+                                            <bx:if data.previewId eq t.getId()><i class="bi bi-eye-slash" aria-hidden="true"></i><bx:else><i class="bi bi-eye" aria-hidden="true"></i></bx:if>
                                         </button>
-                                        <button class="btn btn-link btn-sm p-0" wire:click="duplicate('#encodeForHTMLAttribute( t.getId() )#')" title="Duplicate"><i class="bi bi-files"></i></button>
-                                        <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( t.getId() )#')" title="Edit"><i class="bi bi-pencil"></i></button>
-                                        <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( t.getId() )#')" wire:confirm="Delete this template? Projects already created from it are unaffected." title="Delete"><i class="bi bi-trash"></i></button>
+                                        <button class="btn btn-link btn-sm p-0" wire:click="duplicate('#encodeForHTMLAttribute( t.getId() )#')" title="Duplicate" aria-label="Duplicate template"><i class="bi bi-files" aria-hidden="true"></i></button>
+                                        <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( t.getId() )#')" title="Edit" aria-label="Edit template"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                                        <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( t.getId() )#')" wire:confirm="Delete this template? Projects already created from it are unaffected." title="Delete" aria-label="Delete template"><i class="bi bi-trash" aria-hidden="true"></i></button>
                                     </div>
                                 </div>
 

@@ -128,6 +128,22 @@ input.form-control[type="time"]:hover::-webkit-calendar-picker-indicator {
 }
 
 /*
+ * Accessibility: PM renders many badges with custom background
+ * colors (project statuses, labels). Bootstrap defaults badge text
+ * to white, which fails contrast on light backgrounds (yellow,
+ * cyan, etc.). A subtle dark text-shadow gives every PM badge a
+ * 1px outline that maintains legibility against any background
+ * without forcing the operator to choose a foreground color.
+ *
+ * Scoped to badges that ARE styled with an inline background-color;
+ * Bootstrap's default `.text-bg-*` utilities already pair contrast
+ * pairs correctly and don't need the shadow.
+ */
+.badge[style*="background-color"] {
+	text-shadow: 0 0 1px rgba(0, 0, 0, .6), 0 0 2px rgba(0, 0, 0, .4);
+}
+
+/*
  * Multi-line ellipsis utility. Caps the host element at two visible
  * lines and appends an ellipsis when overflowed. Used on the project-
  * list description column so long descriptions never push the row

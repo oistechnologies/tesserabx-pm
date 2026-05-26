@@ -43,8 +43,9 @@
                         </span>
                         <button type="button" class="btn btn-link btn-sm text-danger p-0"
                                 wire:click="unwatch('#encodeForHTMLAttribute( w.getWatcherType() )#', '#encodeForHTMLAttribute( w.getWatcherId() )#')"
-                                wire:confirm="Remove this watcher? They will stop receiving notifications for this item.">
-                            <i class="bi bi-x-lg"></i>
+                                wire:confirm="Remove this watcher? They will stop receiving notifications for this item."
+                                aria-label="Remove watcher" title="Remove watcher">
+                            <i class="bi bi-x-lg" aria-hidden="true"></i>
                         </button>
                     </li>
                 </bx:loop>

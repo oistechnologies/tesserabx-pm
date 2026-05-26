@@ -65,8 +65,9 @@
                                 </div>
                                 <button class="btn btn-link btn-sm text-danger p-0"
                                         wire:click="unlink('#encodeForHTMLAttribute( row.link.getTicketId() )#')"
-                                        wire:confirm="Remove this link? The ticket and task themselves stay; only the link row is deleted.">
-                                    <i class="bi bi-x-lg"></i>
+                                        wire:confirm="Remove this link? The ticket and task themselves stay; only the link row is deleted."
+                                        aria-label="Unlink ticket" title="Unlink ticket">
+                                    <i class="bi bi-x-lg" aria-hidden="true"></i>
                                 </button>
                             </div>
                             <div class="small text-body-secondary mt-1">
