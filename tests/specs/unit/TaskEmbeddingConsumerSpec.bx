@@ -1,0 +1,123 @@
+/**
+ * TaskEmbeddingConsumerSpec: contract-shape coverage for the
+ * EmbeddingConsumerRegistry@ai contract implementation (Phase 12a,
+ * never tested directly).
+ *
+ * Three entry points:
+ *   - getTextForEmbedding(taskId)
+ *   - saveEmbedding(taskId, vector)
+ *   - listEntitiesNeedingIndex(limit)
+ *
+ * The service path is AI-free (it does not call AiMiddleware itself;
+ * the EmbeddingScheduler does that and then hands the vector to
+ * saveEmbedding). So this spec exercises the contract without
+ * needing AI to be on.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb      = getController().getWireBox();
+        variables.svc     = variables.wb.getInstance( "TaskEmbeddingConsumer@tesserabx-pm" );
+        variables.taskSvc = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.projSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "TaskEmbeddingConsumer@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "getTextForEmbedding combines title + description with a blank-line separator", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var t = variables.taskSvc.createTask( {
+                    projectId      : ctx.projectId,
+                    organizationId : ctx.orgId,
+                    title          : "  Refactor SSO    ",
+                    description    : "Move from cookies to JWT."
+                } );
+                var text = variables.svc.getTextForEmbedding( t.getId() );
+                expect( text ).toMatch( "^Refactor SSO" );
+                expect( text ).toMatch( "Move from cookies" );
+                expect( text ).toMatch( "Refactor SSO" & char( 10 ) & char( 10 ) & "Move from cookies" );
+            } );
+
+            it( "getTextForEmbedding tolerates a task with no description", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var t = variables.taskSvc.createTask( {
+                    projectId      : ctx.projectId,
+                    organizationId : ctx.orgId,
+                    title          : "Bare title"
+                } );
+                expect( variables.svc.getTextForEmbedding( t.getId() ) ).toBe( "Bare title" );
+            } );
+
+            it( "getTextForEmbedding returns empty string for an unknown task id", function(){
+                expect( variables.svc.getTextForEmbedding( createUUID() ) ).toBe( "" );
+            } );
+
+            it( "listEntitiesNeedingIndex returns un-embedded, un-deleted ids", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var t = variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Needs index"
+                } );
+                // Force the embedding to null so this task qualifies.
+                queryExecute( "UPDATE pm_tasks SET embedding = NULL WHERE id = :id", { id : t.getId() } );
+                var ids = variables.svc.listEntitiesNeedingIndex( 200 );
+                expect( ids ).toInclude( t.getId() );
+            } );
+
+            it( "saveEmbedding persists the vector via the documented cast path", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var t = variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Save me"
+                } );
+                // Build a synthetic 1536-d vector of zeros so we don't need AI.
+                var vec = [];
+                for ( var i = 1; i <= 1536; i++ ) vec.append( 0.0 );
+                variables.svc.saveEmbedding( t.getId(), vec );
+                var r = queryExecute(
+                    "SELECT embedding IS NOT NULL AS has_embed FROM pm_tasks WHERE id = :id",
+                    { id : t.getId() }
+                );
+                expect( !!r.has_embed[ 1 ] ).toBeTrue();
+            } );
+
+            it( "saveEmbedding no-ops on an empty vector", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var t = variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Empty"
+                } );
+                queryExecute( "UPDATE pm_tasks SET embedding = NULL WHERE id = :id", { id : t.getId() } );
+                variables.svc.saveEmbedding( t.getId(), [] );
+                var r = queryExecute(
+                    "SELECT embedding IS NULL AS still_null FROM pm_tasks WHERE id = :id",
+                    { id : t.getId() }
+                );
+                expect( !!r.still_null[ 1 ] ).toBeTrue();
+            } );
+
+        } );
+    }
+
+    private struct function newProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pm-tec-" & createUUID(), slug : "pm-tec-" & lCase( replace( createUUID(), "-", "", "all" ) ) }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var p = variables.projSvc.createProject( { organizationId : orgId, name : "EmbeddingConsumer fixture" } );
+        return { orgId : orgId, projectId : p.getId() };
+    }
+
+}

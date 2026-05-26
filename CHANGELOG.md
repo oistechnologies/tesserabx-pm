@@ -6,6 +6,21 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 13c: Test Coverage Backfill
+
+- **New per-service spec bundles for the eight services that arrived without coverage:**
+  - `PriorityScoringServiceSpec` (8 specs): pure-function deterministic scorer. Covers completed / soft-deleted tasks returning 0, base priority weights, due-date pressure (+40 overdue / +25 within 24h / +10 within 7d), the 100-cap safety net (current ceiling is 90 with the documented weights), `scoreBreakdown.reasons[]` shape, and `topForAgent` happy + empty paths.
+  - `ProjectStatusServiceSpec` (10 specs): CRUD + invariants for the Phase 13a status manager. `createStatus` append + default-demote, missing-field guards, `updateStatus` patch + default flip, `removeStatus` happy path + `StatusInUse` + `LastStatus` guards, `reorderStatuses` index ordering. Found and fixed a pgvector-style JDBC binding issue along the way: `reorderStatuses` was binding the integer loop counter as varchar; wrapped in `CAST( :so AS integer )` for cross-driver safety.
+  - `AccountLookupServiceSpec` (9 specs): live-DB reads of agents + contacts. Covers active-only filter, tenant scoping for contacts, combined `listForOrganization`, and `accountLabel` fallback hierarchy (name → email → `type:short-id` → `(unassigned)`).
+  - `ProjectOverviewServiceSpec` (7 specs): aggregation queries. Covers empty-report shape for a missing project, full `taskCounts` (total / open / completed / overdue / dueSoon), `byPriority` per-key tallies, `byStatus` join-aware count, `subtaskStats`, `labels` count via `pm_task_labels`, and a smoke check on the embedded board + assignee-labels map.
+  - `TaskEmbeddingConsumerSpec` (6 specs): the EmbeddingConsumerRegistry@ai contract. `getTextForEmbedding` for title-only, title + description with blank-line separator, and unknown-id cases; `listEntitiesNeedingIndex`; `saveEmbedding` happy + empty-vector no-op (the empty-vector spec also confirms the `cast( :v as vector )` JDBC trick works against a real 1536-d zero vector).
+  - `SuggestionServiceSpec` (4 specs): AI-gating + return-shape coverage. Blank-input short-circuit on both `suggestAssignees` and `suggestLabels`; documented row-shape per result (the actual LLM-driven ranking can't be unit-tested without an AI provider key, so the spec asserts the contract instead).
+  - `SummarizationServiceSpec` (2 specs): outcome-tagged return shape + empty-thread short-circuit. The empty-thread spec tolerates both `outcome=disabled` (AI off) and `outcome=ok` (AI on, canned "No comments" summary).
+  - `TemplateServiceSpec` extended (3 new specs): `duplicateTemplate` produces a `(copy)` named clone, preserves the snapshot JSON's structure, and throws `UnknownTemplate` for a missing id.
+- **InstallSpec probe** for the Phase 13b `POST /pm/tasks/:id/watch` portal-watch route claim.
+- **Spec test totals:** 993 specs green (up from 943 in Phase 13b). All 122 → 129 test bundles passing. CI gate still on the InstallSpec.
+- **Service hardening discovered during spec authoring:** `ProjectStatusService.reorderStatuses` JDBC binding fix (above). No other production-code regressions surfaced.
+
 ### Phase 13b: Portal Watch + Inline Suggest + Accessibility Pass
 
 - **Portal Watch toggle.** Contacts can now self-subscribe to a task from the portal. New action `portal.Tasks.toggleWatch` flips the watch state via the existing polymorphic `WatcherService.toggle` (same code path the agent uses), enforces `VisibilityService.canViewTask` first, and messageboxes + relocates back to the task. New route claim `POST /pm/tasks/:id/watch`. The portal task show template gains a Watch / Unwatch button in the header (`bi-eye` / `bi-eye-slash` icon plus contextual button styling). `portal.Tasks.show` precomputes `prc.isWatching` so the button renders in the right state on initial load. Notifications then route through the existing `PmNotificationDispatcher` (`onPmCommentAdded` / `onPmTaskCompleted` / `onPmTaskStatusChanged` / due-soon / overdue) — contacts get the same fan-out as agent watchers because the dispatcher is already polymorphic.

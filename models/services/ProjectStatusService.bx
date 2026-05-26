@@ -154,8 +154,11 @@ class singleton=true {
      */
     public void function reorderStatuses( required string projectId, required array ids ){
         for ( var i = 1; i <= arrayLen( arguments.ids ); i++ ) {
+            // sort_order is INTEGER in pg; the loop counter is a numeric
+            // BoxLang value, but the JDBC bind path picks varchar by
+            // default. Cast in SQL to keep the parameter declaration simple.
             queryExecute(
-                "UPDATE pm_project_statuses SET sort_order = :so WHERE id = :id AND project_id = :pid",
+                "UPDATE pm_project_statuses SET sort_order = CAST( :so AS integer ) WHERE id = :id AND project_id = :pid",
                 { so : i, id : arguments.ids[ i ], pid : arguments.projectId }
             );
         }

@@ -166,6 +166,49 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.svc.getTemplate( t.getId() ) ).toBeNull();
             } );
 
+            // ---- Phase 13a: duplicateTemplate
+
+            it( "duplicateTemplate produces a clone with a '(copy)' name suffix", function(){
+                var ctx = setupOrg( fixtureOrgIds );
+                var src = variables.svc.createTemplate( {
+                    organizationId : ctx.orgId,
+                    name           : "Original-" & createUUID(),
+                    description    : "the source",
+                    isShared       : false
+                } );
+                var clone = variables.svc.duplicateTemplate(
+                    id        : src.getId(),
+                    actorType : "agent",
+                    actorId   : ""
+                );
+                expect( clone ).notToBeNull();
+                expect( clone.getId() ).notToBe( src.getId() );
+                expect( clone.getName()    ).toBe( src.getName() & " (copy)" );
+                expect( clone.getDescription() ).toBe( "the source" );
+                expect( !!clone.getIsShared() ).toBe( !!src.getIsShared() );
+            } );
+
+            it( "duplicateTemplate preserves the snapshot structure JSON", function(){
+                var ctx   = setupRichProject( fixtureOrgIds );
+                var src   = variables.svc.createFromProject( {
+                    projectId : ctx.project.getId(),
+                    name      : "Snapshot-" & createUUID()
+                } );
+                var clone = variables.svc.duplicateTemplate( id : src.getId() );
+                // structure_json round-trips so the count of nested tasks
+                // / statuses should match.
+                var srcDecoded   = jsonDeserialize( src.getStructureJson() );
+                var cloneDecoded = jsonDeserialize( clone.getStructureJson() );
+                expect( arrayLen( cloneDecoded.statuses ?: [] ) ).toBe( arrayLen( srcDecoded.statuses ?: [] ) );
+                expect( arrayLen( cloneDecoded.tasks    ?: [] ) ).toBe( arrayLen( srcDecoded.tasks    ?: [] ) );
+            } );
+
+            it( "duplicateTemplate throws UnknownTemplate for a missing id", function(){
+                expect( function(){
+                    variables.svc.duplicateTemplate( id : createUUID() );
+                } ).toThrow( type = "TemplateService.UnknownTemplate" );
+            } );
+
         } );
     }
 

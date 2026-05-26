@@ -515,6 +515,14 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( claim.action  ).toBe( "postComment" );
             } );
 
+            it( "claims the POST /pm/tasks/:id/watch portal watch toggle (Phase 13b)", function(){
+                var claim = variables.routeClaims.findByPath( "/pm/tasks/:id/watch" );
+                expect( claim ).notToBeNull();
+                expect( claim.module  ).toBe( "tesserabx-pm" );
+                expect( claim.handler ).toBe( "portal.Tasks" );
+                expect( claim.action  ).toBe( "toggleWatch" );
+            } );
+
             it( "portal landing routes to portal.Main.index", function(){
                 var claim = variables.routeClaims.findByPath( "/pm" );
                 expect( claim ).notToBeNull();

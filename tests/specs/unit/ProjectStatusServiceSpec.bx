@@ -1,0 +1,191 @@
+/**
+ * ProjectStatusServiceSpec: CRUD + invariant coverage for the
+ * Phase 13a status-management surface.
+ *
+ * The pre-Phase-13a service was read-only; this spec exercises the
+ * new createStatus / updateStatus / removeStatus / reorderStatuses
+ * methods, plus the documented guards:
+ *
+ *   - Exactly one is_default per project (auto-demote on set)
+ *   - Cannot delete a status with tasks assigned (StatusInUse)
+ *   - Cannot delete the last remaining status (LastStatus)
+ *   - reorderStatuses persists the new sort_order
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb      = getController().getWireBox();
+        variables.svc     = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+        variables.projSvc = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "ProjectStatusService@tesserabx-pm CRUD (Phase 13a)", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "createStatus appends to the end of the existing list", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var startCount = arrayLen( variables.svc.listForProject( ctx.projectId ) );
+                var s = variables.svc.createStatus( {
+                    projectId      : ctx.projectId,
+                    organizationId : ctx.orgId,
+                    name           : "Blocked",
+                    color          : "##dc3545"
+                } );
+                expect( s ).notToBeNull();
+                expect( s.getId() ).notToBeEmpty();
+                expect( s.getName() ).toBe( "Blocked" );
+                expect( s.getColor() ).toBe( "##dc3545" );
+                var all = variables.svc.listForProject( ctx.projectId );
+                expect( arrayLen( all ) ).toBe( startCount + 1 );
+                expect( all[ arrayLen( all ) ].getId() ).toBe( s.getId() );
+            } );
+
+            it( "createStatus with isDefault=true demotes other defaults", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var existing = variables.svc.defaultStatusForProject( ctx.projectId );
+                expect( existing ).notToBeNull();
+                var newDefault = variables.svc.createStatus( {
+                    projectId      : ctx.projectId,
+                    organizationId : ctx.orgId,
+                    name           : "New Default",
+                    isDefault      : true
+                } );
+                expect( !!newDefault.getIsDefault() ).toBeTrue();
+                // The old default should now have is_default=false.
+                var refreshed = variables.svc.getStatus( existing.getId() );
+                expect( !!refreshed.getIsDefault() ).toBeFalse();
+            } );
+
+            it( "createStatus rejects missing name and projectId", function(){
+                var ctx = newProject( fixtureOrgIds );
+                expect( function(){
+                    variables.svc.createStatus( {
+                        projectId      : ctx.projectId,
+                        organizationId : ctx.orgId,
+                        name           : ""
+                    } );
+                } ).toThrow( type = "ProjectStatusService.MissingField" );
+
+                expect( function(){
+                    variables.svc.createStatus( {
+                        projectId      : "",
+                        organizationId : ctx.orgId,
+                        name           : "X"
+                    } );
+                } ).toThrow( type = "ProjectStatusService.MissingField" );
+            } );
+
+            it( "updateStatus patches name and color", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var s = variables.svc.createStatus( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId,
+                    name : "QA", color : "##6c757d"
+                } );
+                variables.svc.updateStatus( s.getId(), { name : "Quality", color : "##ffc107" } );
+                var fresh = variables.svc.getStatus( s.getId() );
+                expect( fresh.getName()  ).toBe( "Quality" );
+                expect( fresh.getColor() ).toBe( "##ffc107" );
+            } );
+
+            it( "updateStatus flipping isDefault=true demotes prior default", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var oldDefault = variables.svc.defaultStatusForProject( ctx.projectId );
+                var s = variables.svc.createStatus( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, name : "Promote me"
+                } );
+                variables.svc.updateStatus( s.getId(), { isDefault : true } );
+                expect( !!variables.svc.getStatus( s.getId() ).getIsDefault() ).toBeTrue();
+                expect( !!variables.svc.getStatus( oldDefault.getId() ).getIsDefault() ).toBeFalse();
+            } );
+
+            it( "updateStatus rejects blank name", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var s = variables.svc.createStatus( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, name : "X"
+                } );
+                expect( function(){
+                    variables.svc.updateStatus( s.getId(), { name : "" } );
+                } ).toThrow( type = "ProjectStatusService.MissingField" );
+            } );
+
+            it( "removeStatus deletes an unused status", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var s = variables.svc.createStatus( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, name : "Disposable"
+                } );
+                variables.svc.removeStatus( s.getId() );
+                expect( variables.svc.getStatus( s.getId() ) ).toBeNull();
+            } );
+
+            it( "removeStatus throws StatusInUse when a task references it", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var s = variables.svc.createStatus( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, name : "Has Tasks"
+                } );
+                variables.taskSvc.createTask( {
+                    projectId      : ctx.projectId,
+                    organizationId : ctx.orgId,
+                    title          : "blocking",
+                    statusId       : s.getId()
+                } );
+                expect( function(){
+                    variables.svc.removeStatus( s.getId() );
+                } ).toThrow( type = "ProjectStatusService.StatusInUse" );
+            } );
+
+            it( "removeStatus throws LastStatus when only one remains", function(){
+                var ctx = newProject( fixtureOrgIds );
+                // The Standard Workflow template seeded 5 statuses. Delete
+                // four; the last one should refuse to delete.
+                var statuses = variables.svc.listForProject( ctx.projectId );
+                for ( var i = 1; i < arrayLen( statuses ); i++ ) {
+                    variables.svc.removeStatus( statuses[ i ].getId() );
+                }
+                var lastOne = variables.svc.listForProject( ctx.projectId )[ 1 ];
+                expect( function(){
+                    variables.svc.removeStatus( lastOne.getId() );
+                } ).toThrow( type = "ProjectStatusService.LastStatus" );
+            } );
+
+            it( "reorderStatuses applies the new sort_order in index order", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var statuses = variables.svc.listForProject( ctx.projectId );
+                if ( arrayLen( statuses ) < 2 ) return;
+                var reversed = [];
+                for ( var i = arrayLen( statuses ); i >= 1; i-- ) reversed.append( statuses[ i ].getId() );
+                variables.svc.reorderStatuses( ctx.projectId, reversed );
+                var fresh = variables.svc.listForProject( ctx.projectId );
+                expect( fresh[ 1 ].getId() ).toBe( reversed[ 1 ] );
+                expect( fresh[ arrayLen( fresh ) ].getId() ).toBe( reversed[ arrayLen( reversed ) ] );
+            } );
+
+        } );
+    }
+
+    // ---------- fixtures ----------
+
+    private struct function newProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pm-pss-" & createUUID(), slug : "pm-pss-" & lCase( replace( createUUID(), "-", "", "all" ) ) }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var p = variables.projSvc.createProject( { organizationId : orgId, name : "Status fixture" } );
+        return { orgId : orgId, projectId : p.getId() };
+    }
+
+}

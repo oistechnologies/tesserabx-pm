@@ -1,0 +1,166 @@
+/**
+ * AccountLookupServiceSpec: directory-read coverage for the
+ * Phase 13a picker service.
+ *
+ * Exercises listAgents, listContactsForOrganization,
+ * listForOrganization, accountLabel against live host tables. Each
+ * spec creates throwaway agent + contact fixtures and confirms the
+ * service surfaces them with the expected `{ id, label, email, type }`
+ * shape and label-fallback rules.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb  = getController().getWireBox();
+        variables.svc = variables.wb.getInstance( "AccountLookupService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "AccountLookupService@tesserabx-pm", function(){
+
+            var fixtureOrgIds   = [];
+            var fixtureAgentIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                for ( var aid in fixtureAgentIds ) {
+                    queryExecute( "DELETE FROM agents WHERE id = :id", { id : aid } );
+                }
+                fixtureOrgIds   = [];
+                fixtureAgentIds = [];
+            } );
+
+            it( "listAgents returns active agents with composed labels", function(){
+                var aid = createUUID();
+                makeAgent( aid, "Jane", "Doe", "jane@spec.test" );
+                fixtureAgentIds.append( aid );
+                var rows = variables.svc.listAgents( 500 );
+                var found = rows.filter( ( r ) => r.id == aid );
+                expect( arrayLen( found ) ).toBe( 1 );
+                expect( found[ 1 ].type  ).toBe( "agent" );
+                expect( found[ 1 ].email ).toBe( "jane@spec.test" );
+                expect( found[ 1 ].label ).toBe( "Jane Doe (jane@spec.test)" );
+            } );
+
+            it( "listAgents omits inactive agents", function(){
+                var aid = createUUID();
+                makeAgent( aid, "In", "Active", "inactive@spec.test", false );
+                fixtureAgentIds.append( aid );
+                var rows = variables.svc.listAgents();
+                var found = rows.filter( ( r ) => r.id == aid );
+                expect( arrayLen( found ) ).toBe( 0 );
+            } );
+
+            it( "listContactsForOrganization is tenant-scoped", function(){
+                var org1 = newOrg( fixtureOrgIds );
+                var org2 = newOrg( fixtureOrgIds );
+                var c1 = createUUID();
+                var c2 = createUUID();
+                makeContact( c1, org1, "Alice", "Org-1", "alice@org1.test" );
+                makeContact( c2, org2, "Bob",   "Org-2", "bob@org2.test"   );
+                var rows1 = variables.svc.listContactsForOrganization( org1 );
+                var ids1  = rows1.map( ( r ) => r.id );
+                expect( ids1 ).toInclude( c1 );
+                expect( ids1 ).notToInclude( c2 );
+                var c1Rows = rows1.filter( ( r ) => r.id == c1 );
+                expect( arrayLen( c1Rows ) ).toBe( 1 );
+                expect( c1Rows[ 1 ].type ).toBe( "contact" );
+            } );
+
+            it( "listContactsForOrganization returns empty for blank orgId", function(){
+                expect( variables.svc.listContactsForOrganization( "" ) ).toBeEmpty();
+            } );
+
+            it( "listForOrganization combines agents + contacts of one tenant", function(){
+                var org = newOrg( fixtureOrgIds );
+                var aid = createUUID();
+                var cid = createUUID();
+                makeAgent( aid, "A", "Agent", "a@spec.test" );
+                fixtureAgentIds.append( aid );
+                makeContact( cid, org, "C", "Contact", "c@spec.test" );
+                var rows = variables.svc.listForOrganization( org );
+                var ids  = rows.map( ( r ) => r.id );
+                expect( ids ).toInclude( aid );
+                expect( ids ).toInclude( cid );
+            } );
+
+            it( "accountLabel returns 'First Last (email)' when both present", function(){
+                var aid = createUUID();
+                makeAgent( aid, "Test", "Person", "t@spec.test" );
+                fixtureAgentIds.append( aid );
+                expect( variables.svc.accountLabel( "agent", aid ) ).toBe( "Test Person (t@spec.test)" );
+            } );
+
+            it( "accountLabel falls back to email when no name", function(){
+                var aid = createUUID();
+                makeAgent( aid, "", "", "nameless@spec.test" );
+                fixtureAgentIds.append( aid );
+                expect( variables.svc.accountLabel( "agent", aid ) ).toBe( "nameless@spec.test" );
+            } );
+
+            it( "accountLabel falls back to type:short-id for unknown accounts", function(){
+                var unknown = createUUID();
+                var lbl = variables.svc.accountLabel( "agent", unknown );
+                expect( lbl ).toMatch( "^agent:.{8}$" );
+            } );
+
+            it( "accountLabel returns (unassigned) for blank accountId", function(){
+                expect( variables.svc.accountLabel( "agent", "" ) ).toBe( "(unassigned)" );
+            } );
+
+        } );
+    }
+
+    // ---------- fixtures ----------
+
+    private string function newOrg( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pm-als-" & createUUID(), slug : "pm-als-" & lCase( replace( createUUID(), "-", "", "all" ) ) }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        return orgId;
+    }
+
+    private void function makeAgent(
+        required string id,
+        string firstName = "",
+        string lastName  = "",
+        string email     = "spec@spec.test",
+        boolean active   = true
+    ){
+        var sql = "INSERT INTO agents ( id, email, password_hash, first_name, last_name, is_active, is_admin, created_at, updated_at, mfa_enabled )
+             VALUES ( :id, :email, '', :first, :last, " & ( arguments.active ? "TRUE" : "FALSE" ) & ", FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE )";
+        queryExecute(
+            sql,
+            { id : arguments.id, email : arguments.email, first : arguments.firstName, last : arguments.lastName }
+        );
+    }
+
+    private void function makeContact(
+        required string id,
+        required string organizationId,
+        string firstName = "",
+        string lastName  = "",
+        string email     = "contact@spec.test"
+    ){
+        queryExecute(
+            "INSERT INTO contacts ( id, organization_id, email, password_hash, first_name, last_name, is_active, created_at, updated_at, mfa_enabled )
+             VALUES ( :id, :org, :email, '', :first, :last, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE )",
+            {
+                id    : arguments.id,
+                org   : arguments.organizationId,
+                email : arguments.email,
+                first : arguments.firstName,
+                last  : arguments.lastName
+            }
+        );
+    }
+
+}

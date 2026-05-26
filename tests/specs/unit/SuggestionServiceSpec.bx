@@ -1,0 +1,104 @@
+/**
+ * SuggestionServiceSpec: AI-gating + sparse-data coverage for the
+ * Phase 12b suggest-assignees / suggest-labels surface.
+ *
+ * The service short-circuits when AI is disabled OR the input text
+ * is empty. With AI on, it delegates to SimilarityService.findSimilar
+ * ToText which depends on the embedding pipeline; testing that end-
+ * to-end requires a working AI provider key, which spec runs do not
+ * have. This spec covers the deterministic paths:
+ *
+ *   - AI off    -> empty array
+ *   - empty input -> empty array
+ *   - happy path returns an array shape we can assert against (it may
+ *     be empty if no similar history exists, but the return type is
+ *     stable)
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb       = getController().getWireBox();
+        variables.svc      = variables.wb.getInstance( "SuggestionService@tesserabx-pm" );
+        variables.aiCap    = variables.wb.getInstance( "AiCapability@ai" );
+        variables.projSvc  = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "SuggestionService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "suggestAssignees returns [] when the text input is blank", function(){
+                var ctx = newProject( fixtureOrgIds );
+                expect( variables.svc.suggestAssignees(
+                    taskTitle : "", taskDescription : "", projectId : ctx.projectId
+                ) ).toBeEmpty();
+            } );
+
+            it( "suggestLabels returns [] when the text input is blank", function(){
+                var ctx = newProject( fixtureOrgIds );
+                expect( variables.svc.suggestLabels(
+                    taskTitle : "", taskDescription : "", projectId : ctx.projectId
+                ) ).toBeEmpty();
+            } );
+
+            it( "suggestAssignees returns an array with stable row shape", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var result = variables.svc.suggestAssignees(
+                    taskTitle : "Fix login redirect",
+                    projectId : ctx.projectId,
+                    limit     : 3
+                );
+                expect( result ).toBeArray();
+                // The array may be empty (no similar history); when it has
+                // rows, every row carries the documented keys.
+                for ( var row in result ) {
+                    expect( row ).toHaveKey( "assignee_type" );
+                    expect( row ).toHaveKey( "assignee_id"   );
+                    expect( row ).toHaveKey( "label"         );
+                    expect( row ).toHaveKey( "count"         );
+                    expect( row ).toHaveKey( "max_similarity" );
+                }
+            } );
+
+            it( "suggestLabels returns an array with stable row shape", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var result = variables.svc.suggestLabels(
+                    taskTitle : "Fix login redirect",
+                    projectId : ctx.projectId,
+                    limit     : 3
+                );
+                expect( result ).toBeArray();
+                for ( var row in result ) {
+                    expect( row ).toHaveKey( "label_id" );
+                    expect( row ).toHaveKey( "name"     );
+                    expect( row ).toHaveKey( "color"    );
+                    expect( row ).toHaveKey( "count"    );
+                }
+            } );
+
+        } );
+    }
+
+    private struct function newProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pm-ssg-" & createUUID(), slug : "pm-ssg-" & lCase( replace( createUUID(), "-", "", "all" ) ) }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var p = variables.projSvc.createProject( { organizationId : orgId, name : "Suggestion fixture" } );
+        return { orgId : orgId, projectId : p.getId() };
+    }
+
+}

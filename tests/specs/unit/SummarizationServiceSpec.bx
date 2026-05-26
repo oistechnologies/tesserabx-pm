@@ -1,0 +1,91 @@
+/**
+ * SummarizationServiceSpec: outcome-tagged contract coverage for the
+ * Phase 12b thread summarizer.
+ *
+ * The actual LLM call path requires a working AI provider key, which
+ * the spec runner does not have. The deterministic surface we CAN
+ * test is:
+ *
+ *   - AI disabled -> outcome "disabled", no LLM call
+ *   - Empty comment thread -> outcome "ok" with a canned summary
+ *   - Return struct shape is stable (outcome / summary / keyPoints /
+ *     nextStep / error / raw)
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb       = getController().getWireBox();
+        variables.svc      = variables.wb.getInstance( "SummarizationService@tesserabx-pm" );
+        variables.projSvc  = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc  = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "SummarizationService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "summarizeThread returns the canonical struct shape", function(){
+                var ctx  = newProject( fixtureOrgIds );
+                var task = variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Some task"
+                } );
+                var result = variables.svc.summarizeThread(
+                    commentableType : "task",
+                    commentableId   : task.getId(),
+                    viewer          : { accountType : "agent", accountId : "" }
+                );
+                expect( result ).toBeStruct();
+                expect( result ).toHaveKey( "outcome"   );
+                expect( result ).toHaveKey( "summary"   );
+                expect( result ).toHaveKey( "keyPoints" );
+                expect( result ).toHaveKey( "nextStep"  );
+                expect( result ).toHaveKey( "error"     );
+                expect( result ).toHaveKey( "raw"       );
+            } );
+
+            it( "summarizeThread on an empty thread returns ok + 'no comments' summary", function(){
+                var ctx  = newProject( fixtureOrgIds );
+                var task = variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Empty thread"
+                } );
+                var result = variables.svc.summarizeThread(
+                    commentableType : "task",
+                    commentableId   : task.getId(),
+                    viewer          : { accountType : "agent", accountId : "" }
+                );
+                // Either AI is off (outcome=disabled) or AI is on and
+                // the empty-thread short-circuit returns ok + canned text.
+                // Both paths are correct; assert one of them holds.
+                var outcome = result.outcome ?: "";
+                expect( [ "disabled", "ok" ] ).toInclude( outcome );
+                if ( outcome == "ok" ) {
+                    expect( result.summary ).toMatch( "(?i)no comments" );
+                }
+            } );
+
+        } );
+    }
+
+    private struct function newProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pm-sms-" & createUUID(), slug : "pm-sms-" & lCase( replace( createUUID(), "-", "", "all" ) ) }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var p = variables.projSvc.createProject( { organizationId : orgId, name : "Summarization fixture" } );
+        return { orgId : orgId, projectId : p.getId() };
+    }
+
+}

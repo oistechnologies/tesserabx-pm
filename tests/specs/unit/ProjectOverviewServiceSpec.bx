@@ -1,0 +1,167 @@
+/**
+ * ProjectOverviewServiceSpec: aggregation-query coverage for the
+ * Phase 13a overview report service.
+ *
+ * `assemble(projectId)` returns one struct with every panel's data.
+ * Each spec verifies one section:
+ *
+ *   - taskCounts: total / open / completed / overdue / dueSoon
+ *   - byPriority: counts per priority key
+ *   - byStatus:   array of { id, name, color, count }
+ *   - subtaskStats: total / completed
+ *   - labels: array with counts joined via pm_task_labels
+ *   - empty-project shape (no statuses, no tasks, no labels)
+ *
+ * Embedding-driven fields (board + assigneeLabels) get a smoke check
+ * but are not exercised in depth here; the underlying BoardService +
+ * AccountLookupService have their own specs.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wb       = getController().getWireBox();
+        variables.svc      = variables.wb.getInstance( "ProjectOverviewService@tesserabx-pm" );
+        variables.projSvc  = variables.wb.getInstance( "ProjectService@tesserabx-pm" );
+        variables.taskSvc  = variables.wb.getInstance( "TaskService@tesserabx-pm" );
+        variables.subSvc   = variables.wb.getInstance( "SubtaskService@tesserabx-pm" );
+        variables.labelSvc = variables.wb.getInstance( "LabelService@tesserabx-pm" );
+        variables.statusSvc = variables.wb.getInstance( "ProjectStatusService@tesserabx-pm" );
+    }
+
+    function run(){
+        describe( "ProjectOverviewService@tesserabx-pm", function(){
+
+            var fixtureOrgIds = [];
+
+            afterEach( function( currentSpec ){
+                for ( var orgId in fixtureOrgIds ) {
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+                fixtureOrgIds = [];
+            } );
+
+            it( "assemble returns the empty-report shape for a missing project", function(){
+                var r = variables.svc.assemble( createUUID() );
+                expect( r.project ).toBeNull();
+                expect( arrayLen( r.statuses ) ).toBe( 0 );
+                expect( r.taskCounts.total ).toBe( 0 );
+                expect( arrayLen( r.byAssignee ) ).toBe( 0 );
+            } );
+
+            it( "taskCounts totals open + completed + overdue + dueSoon correctly", function(){
+                var ctx = newProject( fixtureOrgIds );
+                // 1 open, 1 completed, 1 overdue (open w/ past due), 1 due-soon.
+                variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Open"
+                } );
+                var done = variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Done"
+                } );
+                queryExecute( "UPDATE pm_tasks SET completed_at = CURRENT_TIMESTAMP WHERE id = :id", { id : done.getId() } );
+                variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Late",
+                    dueDate   : dateFormat( dateAdd( "d", -2, now() ), "yyyy-mm-dd" )
+                } );
+                variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, title : "Soon",
+                    dueDate   : dateFormat( dateAdd( "d", 3, now() ), "yyyy-mm-dd" )
+                } );
+
+                var r = variables.svc.assemble( ctx.projectId );
+                expect( r.taskCounts.total     ).toBe( 4 );
+                expect( r.taskCounts.completed ).toBe( 1 );
+                expect( r.taskCounts.open      ).toBe( 3 );
+                expect( r.taskCounts.overdue   ).toBe( 1 );
+                expect( r.taskCounts.dueSoon   ).toBe( 1 );
+            } );
+
+            it( "byPriority returns one count per documented key", function(){
+                var ctx = newProject( fixtureOrgIds );
+                variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "u1", priority : "urgent" } );
+                variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "u2", priority : "urgent" } );
+                variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "h1", priority : "high" } );
+                variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "m1", priority : "medium" } );
+
+                var r = variables.svc.assemble( ctx.projectId );
+                expect( r.byPriority.urgent ).toBe( 2 );
+                expect( r.byPriority.high   ).toBe( 1 );
+                expect( r.byPriority.medium ).toBe( 1 );
+                expect( r.byPriority.low    ).toBe( 0 );
+            } );
+
+            it( "byStatus returns one row per project status with a join-aware task count", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var statuses = variables.statusSvc.listForProject( ctx.projectId );
+                expect( arrayLen( statuses ) ).toBeGT( 0 );
+                var firstStatus = statuses[ 1 ];
+                variables.taskSvc.createTask( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId,
+                    title     : "in first status",
+                    statusId  : firstStatus.getId()
+                } );
+                var r = variables.svc.assemble( ctx.projectId );
+                expect( arrayLen( r.byStatus ) ).toBe( arrayLen( statuses ) );
+                var hit = r.byStatus.filter( ( s ) => s.id == firstStatus.getId() );
+                expect( arrayLen( hit ) ).toBe( 1 );
+                expect( hit[ 1 ].count ).toBe( 1 );
+            } );
+
+            it( "subtaskStats reports total + completed across the project's tasks", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var parent = variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "Parent" } );
+                variables.subSvc.createSubtask( { taskId : parent.getId(), organizationId : ctx.orgId, title : "A" } );
+                variables.subSvc.createSubtask( { taskId : parent.getId(), organizationId : ctx.orgId, title : "B" } );
+                // Mark one complete via direct UPDATE; service exposes complete()
+                // but the spec only needs the count.
+                queryExecute(
+                    "UPDATE pm_subtasks SET is_completed = TRUE WHERE task_id = :tid AND title = 'A'",
+                    { tid : parent.getId() }
+                );
+                var r = variables.svc.assemble( ctx.projectId );
+                expect( r.subtaskStats.total     ).toBe( 2 );
+                expect( r.subtaskStats.completed ).toBe( 1 );
+            } );
+
+            it( "labels returns label counts joined through pm_task_labels", function(){
+                var ctx = newProject( fixtureOrgIds );
+                var lbl = variables.labelSvc.createLabel( {
+                    projectId : ctx.projectId, organizationId : ctx.orgId, name : "OverviewLbl"
+                } );
+                var t = variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "labeled" } );
+                queryExecute(
+                    "INSERT INTO pm_task_labels ( id, task_id, label_id, created_at ) VALUES ( :i, :t, :l, CURRENT_TIMESTAMP )",
+                    { i : createUUID(), t : t.getId(), l : lbl.getId() }
+                );
+                var r = variables.svc.assemble( ctx.projectId );
+                var hit = r.labels.filter( ( l ) => l.id == lbl.getId() );
+                expect( arrayLen( hit ) ).toBe( 1 );
+                expect( hit[ 1 ].count ).toBe( 1 );
+            } );
+
+            it( "board.columns + assigneeLabels are populated (smoke)", function(){
+                var ctx = newProject( fixtureOrgIds );
+                variables.taskSvc.createTask( { projectId : ctx.projectId, organizationId : ctx.orgId, title : "Smoke" } );
+                var r = variables.svc.assemble( ctx.projectId );
+                expect( r.board ).toBeStruct();
+                expect( structKeyExists( r.board, "columns" ) ).toBeTrue();
+                expect( r.assigneeLabels ).toBeStruct();
+            } );
+
+        } );
+    }
+
+    private struct function newProject( required array fixtureOrgIds ){
+        var orgId = createUUID();
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, is_active, created_at, updated_at )
+             VALUES ( :id, :name, :slug, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )",
+            { id : orgId, name : "pm-pos-" & createUUID(), slug : "pm-pos-" & lCase( replace( createUUID(), "-", "", "all" ) ) }
+        );
+        arguments.fixtureOrgIds.append( orgId );
+        var p = variables.projSvc.createProject( { organizationId : orgId, name : "Overview fixture" } );
+        return { orgId : orgId, projectId : p.getId() };
+    }
+
+}
