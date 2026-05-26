@@ -1,7 +1,7 @@
 {
     "name":"tesserabx-pm",
     "slug":"tesserabx-pm",
-    "version":"0.0.1",
+    "version":"1.0.0",
     "author":"OIS Technologies",
     "location":"https://github.com/oistechnologies/tesserabx-pm",
     "homepage":"https://github.com/oistechnologies/tesserabx-pm",
@@ -13,6 +13,29 @@
     "shortDescription":"Project Management add-on for the TesseraBX helpdesk platform.",
     "description":"A third-party TesseraBX add-on. Adds projects, tasks, subtasks, customizable kanban boards, time tracking, templates, per-project custom fields, bidirectional ticket integration, mentions, watchers, a client-portal surface, and pgvector-backed AI augmentation through the host's AI middleware. Installs at modules/tesserabx-pm/ and participates in the host's settings.tesserabx manifest contract.",
     "type":"modules",
+    "keywords":[
+        "tesserabx",
+        "tesserabx-addon",
+        "project-management",
+        "kanban",
+        "tasks",
+        "coldbox",
+        "boxlang",
+        "cbwire",
+        "ai",
+        "pgvector"
+    ],
+    "instructions":"After install run `box run-script migrate:stage && box run-script migrate:up` from the TesseraBX host repo root to land PM's schema. PM mounts itself into the host via the settings.tesserabx manifest contract; no additional configuration is required.",
+    "ignore":[
+        ".git",
+        ".github",
+        ".gitignore",
+        "tests",
+        "compose.override.yaml.example",
+        "docs/BUILD-PLAN.md",
+        "docs/CBWIRE-TMP-TRUNCATION-BUG.md",
+        "CLAUDE.md"
+    ],
     "license":[
         {
             "type":"Apache-2.0",

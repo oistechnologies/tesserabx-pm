@@ -6,6 +6,17 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Phase 13d: Release Prep (docs + ForgeBox-ready)
+
+- **README rewrite.** Replaced the pre-1.0 scaffold note with a feature inventory table (Agent / Portal / Admin / AI / API / Automation / Notifications) and added a Configuration section documenting the per-tenant `pm.default-template-id` setting, the env vars PM reads (`AI_ENABLED`, `AI_EMBEDDING_MODEL`, `SCHEDULER_MODE`), and the six roles PM ships through the host's role registry. Status line updated to "v1.0.0 release prep."
+- **`docs/USAGE.md` (new).** Surface-by-surface walkthrough of every PM feature in v1.0.0: agent surface (project list / show / overview / kanban / list / calendar / my-tasks / time reports / task detail / per-project status / label / custom-field admin), client portal (project list / show / task show / watch / comment composer), admin (`/agent/admin/pm` landing + Templates + Embedding Backfill + per-tenant Default Template picker), AI features (related tasks / summarize / suggest / explain / priority widget), and notification fan-out. Includes the role-to-permission table.
+- **`docs/API.md` (new).** REST endpoint catalog under `/api/v1/pm/`: Projects (7 endpoints), Tasks (5 endpoints), Subtasks (4 endpoints). Documents auth + tenancy + pagination + error conventions, lists every webhook event key PM announces (14 total), points operators at the three admin-only POST endpoints (`embed-backlog`, `embed-backlog-ui`, `default-template`), and includes the permissions reference table.
+- **`CONTRIBUTING.md` (new).** Post-v1 feature-branch workflow: branch off `main`, PR with CI green + one approving review, squash-merge. Commit-message conventions (Conventional Commits), review checklist for new features (InstallSpec coverage, AI gating, tenant scope, em-dash check, CHANGELOG entry), release process for maintainers (CHANGELOG promote + box.json bump + tag + `box publish` + GitHub release), and a note on the BoxLang / CBWire parser gotchas with a pointer to `docs/CBWIRE-TMP-TRUNCATION-BUG.md`.
+- **`box.json` ForgeBox prep.** Bumped `version` from `0.0.1` to `1.0.0`. Added a `keywords` array (`tesserabx`, `tesserabx-addon`, `project-management`, `kanban`, `tasks`, `coldbox`, `boxlang`, `cbwire`, `ai`, `pgvector`), an `instructions` block ("after install, run migrate:stage + migrate:up"), and an `ignore` array that keeps dev artifacts (`.git`, `.github`, `tests/`, the host-internal BUILD-PLAN and CBWIRE bug docs, `compose.override.yaml.example`, `CLAUDE.md`) out of the published artifact. **Not actually published**; this is prep only. Run `box publish` from the repo root to publish when ready.
+- **`ModuleConfig.bx` version bump.** Both `this.version` and `settings.tesserabx.version` updated to `1.0.0` so the host's `addons` table reflects the released version on next boot.
+- **`CLAUDE.md` refresh.** Rule 7 (direct-to-`main` during v1) replaced with a feature-branch workflow pointer to `CONTRIBUTING.md`. Session-start checklist rewritten for post-v1 contribution flow (branch + PR instead of direct push).
+- **Not done in this phase (intentional):** `v1.0.0` git tag, GitHub branch protection on `main`, actual `box publish` to ForgeBox. Ready for Mike to do those manually once smoke-tested.
+
 ### Phase 13c: Test Coverage Backfill
 
 - **New per-service spec bundles for the eight services that arrived without coverage:**

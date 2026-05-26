@@ -22,7 +22,7 @@ class {
     this.author             = "OIS Technologies";
     this.webURL             = "https://github.com/oistechnologies/tesserabx-pm";
     this.description        = "Project Management add-on for the TesseraBX helpdesk platform.";
-    this.version            = "0.0.1";
+    this.version            = "1.0.0";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
     // PM owns the `/agent/pm` URL space directly through its module
@@ -52,7 +52,7 @@ class {
                 // omitted so any host >= 0.0.1 accepts PM.
                 addonId        : "tesserabx-pm",
                 displayName    : "Project Management",
-                version        : "0.0.1",
+                version        : "1.0.0",
                 minCoreVersion : "0.0.1",
                 contributesTo  : [
                     "permissions", "roles", "navigation",

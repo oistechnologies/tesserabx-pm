@@ -18,7 +18,7 @@ These are inherited from the TesseraBX host plus PM-specific rules.
 4. **Tenant scope.** `Organization` is the tenant boundary, `organization_id` is the column, and the global scope `TenantScope@contacts` is mandatory on every tenant-scoped PM entity from its first migration. No retrofitting.
 5. **Two account families.** TesseraBX has `Agent` (provider side, `/agent`) and `Contact` (client side, `/`). PM concepts that refer to "users" (assignees, watchers, mentions, comment authors, time-log users) treat both account types as first-class through polymorphic `*_type` and `*_id` columns.
 6. **No commits without Mike's explicit approval.** See BUILD-PLAN §4.4. Phase work happens in the working tree. Commits happen only after tests pass, Mike reviews the diff, Mike tests any UI changes, and Mike says "approved, commit it" (or equivalent).
-7. **Direct to `main` during v1.** No feature branches, no PRs until `v1.0.0` ships. Branch protection and feature-branch workflow turn on at the v1 release.
+7. **Feature-branch workflow post v1.0.0.** Pre-1.0 was direct-to-`main`; once v1.0.0 ships, every change lands through a PR with CI green + one approving review. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 8. **Stay within the active phase.** Do not start the next phase until the current one is approved, committed, and CI is green.
 
 ## Stack at a Glance
@@ -78,16 +78,15 @@ Every phase touches one or more of these contracts. Before starting a phase, sca
 
 ## Session Start Checklist
 
-1. Read [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) in full.
-2. Read this file.
-3. Skim the host `docs/EXTENSIONS.md` sections relevant to the active phase.
-4. Determine the active phase from `CHANGELOG.md` and the latest commits on `main`.
-5. Confirm the phase with Mike before starting work.
-6. Do the phase work. Run tests locally inside the host dev stack. **Do not commit.**
-7. At phase end, produce a summary: file inventory, manifest deltas (the registry entries the phase added), test results, manual UI test checklist, any deferred items or open questions.
-8. Wait for Mike's explicit approval.
-9. Once approved, commit using Conventional Commits in logical batches, update `CHANGELOG.md` in the same batch, and push to `main`.
-10. Verify CI passes. If red, produce a fix-up commit before considering the phase closed.
+1. Read [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) and [`CHANGELOG.md`](CHANGELOG.md) to understand shipped state.
+2. Read this file plus [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contribution flow.
+3. Skim the host `docs/EXTENSIONS.md` sections relevant to the task.
+4. Confirm scope with Mike before starting work.
+5. Do the work on a feature branch off `main`. Run tests locally inside the host dev stack. **Do not commit to `main` directly.**
+6. At task end, produce a summary: file inventory, manifest deltas (the registry entries added or modified), test results, manual UI test checklist, any deferred items or open questions.
+7. Wait for Mike's explicit approval.
+8. Once approved, commit using Conventional Commits, update `CHANGELOG.md` under `[Unreleased]`, push the branch, and open a PR.
+9. Verify CI passes on the PR. If red, push a fix-up commit before requesting review.
 
 ## When You Are Unsure
 
