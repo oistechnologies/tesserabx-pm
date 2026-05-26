@@ -119,6 +119,43 @@ class singleton=true {
     }
 
     /**
+     * Phase 13a polish: one-click clone of an existing template.
+     * Preserves the snapshot structure and shared flag; appends
+     * " (copy)" to the name unless `newName` overrides; the new
+     * template is owned by the cloning agent's organization unless
+     * the source was global / shared (then the clone stays global).
+     */
+    public any function duplicateTemplate(
+        required string id,
+        string  newName        = "",
+        string  actorType      = "system",
+        string  actorId        = "",
+        string  organizationId = ""
+    ){
+        var src = getTemplate( arguments.id );
+        if ( isNull( src ) ) throw( type = "TemplateService.UnknownTemplate", message = "No template with id [#arguments.id#]." );
+
+        var structure = emptyStructure();
+        var raw       = src.getStructureJson() ?: "";
+        if ( len( raw ) ) {
+            try {
+                var parsed = jsonDeserialize( raw );
+                if ( isStruct( parsed ) ) structure = parsed;
+            } catch ( any e ) {}
+        }
+        var cloneName = len( trim( arguments.newName ) ) ? arguments.newName : ( src.getName() & " (copy)" );
+        return createTemplate( {
+            name           : cloneName,
+            description    : src.getDescription() ?: "",
+            isShared       : !!src.getIsShared(),
+            structure      : structure,
+            organizationId : arguments.organizationId,
+            actorType      : arguments.actorType,
+            actorId        : arguments.actorId
+        } );
+    }
+
+    /**
      * Convenience helper for the admin form's "create from project"
      * path: snapshot + persist in one call. Returns the new template.
      */

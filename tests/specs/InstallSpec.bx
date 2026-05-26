@@ -147,7 +147,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
                 var adminClaim = variables.routeClaims.findByPath( "/agent/admin/pm" );
                 expect( adminClaim.module  ).toBe( "tesserabx-pm" );
-                expect( adminClaim.handler ).toBe( "Main" );
+                expect( adminClaim.handler ).toBe( "admin.Main" );
                 expect( adminClaim.action  ).toBe( "index" );
 
                 var portalClaim = variables.routeClaims.findByPath( "/pm" );
@@ -379,11 +379,13 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.wb.getInstance( "TemplateDto@tesserabx-pm" ) ).notToBeNull();
             } );
 
-            it( "registers the pm.admin.templates adminPage", function(){
+            it( "no longer surfaces a separate pm.admin.templates adminPage tile (Phase 13a)", function(){
+                // The Templates surface is now reached through the
+                // landing tile's "Manage templates" button. The
+                // routeClaim for /agent/admin/pm/templates still
+                // exists; only the duplicate adminPage tile is gone.
                 var hits = variables.adminPages.listAll().filter( ( c ) => c.id == "pm.admin.templates" );
-                expect( hits.len() ).toBe( 1 );
-                expect( hits[ 1 ].route              ).toBe( "/agent/admin/pm/templates" );
-                expect( hits[ 1 ].requiredPermission ).toBe( "pm.admin" );
+                expect( hits.len() ).toBe( 0 );
             } );
 
             it( "claims /agent/admin/pm/templates in RouteClaimsRegistry@core", function(){
@@ -554,6 +556,22 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( claim.action  ).toBe( "run" );
             } );
 
+            it( "claims the POST /agent/admin/pm/embed-backlog-ui admin button endpoint", function(){
+                var claim = variables.routeClaims.findByPath( "/agent/admin/pm/embed-backlog-ui" );
+                expect( claim ).notToBeNull();
+                expect( claim.module  ).toBe( "tesserabx-pm" );
+                expect( claim.handler ).toBe( "admin.EmbeddingBackfill" );
+                expect( claim.action  ).toBe( "runUi" );
+            } );
+
+            it( "claims the POST /agent/admin/pm/default-template per-tenant picker endpoint", function(){
+                var claim = variables.routeClaims.findByPath( "/agent/admin/pm/default-template" );
+                expect( claim ).notToBeNull();
+                expect( claim.module  ).toBe( "tesserabx-pm" );
+                expect( claim.handler ).toBe( "admin.Main" );
+                expect( claim.action  ).toBe( "saveDefaultTemplate" );
+            } );
+
             // ---- Phase 12b: AI completion features + recommended-next-task widget.
 
             it( "binds PriorityScoringService@tesserabx-pm in WireBox", function(){
@@ -583,6 +601,16 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( hits.len() ).toBe( 1 );
                 expect( hits[ 1 ].dataProvider ).toBe( "PriorityScoringService@tesserabx-pm" );
                 expect( hits[ 1 ].dataMethod   ).toBe( "topForAgent" );
+            } );
+
+            // ---- Phase 13a: account picker service.
+
+            it( "binds AccountLookupService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "AccountLookupService@tesserabx-pm" ) ).notToBeNull();
+            } );
+
+            it( "binds ProjectOverviewService@tesserabx-pm in WireBox", function(){
+                expect( variables.wb.getInstance( "ProjectOverviewService@tesserabx-pm" ) ).notToBeNull();
             } );
 
             // Phase 2+ probes are appended below as registries are

@@ -1,0 +1,185 @@
+<bx:output>
+<div class="container-fluid">
+
+	<nav aria-label="breadcrumb" class="mb-2">
+		<ol class="breadcrumb mb-0 small">
+			<li class="breadcrumb-item"><a href="/agent/admin" class="link-secondary">Admin</a></li>
+			<li class="breadcrumb-item active" aria-current="page">Project Management</li>
+		</ol>
+	</nav>
+
+	<div class="d-flex justify-content-between align-items-start mb-3 gap-3 flex-wrap">
+		<div>
+			<h1 class="mb-1 fs-3"><i class="bi bi-kanban"></i> Project Management</h1>
+			<p class="text-body-secondary mb-0 small">
+				Configure templates, manage AI indexing, and inspect add-on status.
+				<bx:if !isNull( prc.addonRow ?: javaCast( "null", "" ) )>
+					Version <code>#encodeForHTML( prc.addonRow.version ?: "" )#</code>.
+				</bx:if>
+				<bx:if !prc.aiEnabled>
+					<span class="badge text-bg-secondary ms-1">AI disabled</span>
+				</bx:if>
+			</p>
+		</div>
+		<div class="d-flex gap-2">
+			<a class="btn btn-outline-secondary" href="/agent/pm/projects"><i class="bi bi-list"></i> Projects</a>
+		</div>
+	</div>
+
+	<!--- Headline stats --->
+	<div class="row g-3 mb-3">
+		<div class="col-6 col-md-3">
+			<div class="card h-100"><div class="card-body">
+				<div class="text-body-secondary small">Active projects</div>
+				<div class="display-6">#prc.stats.projects#</div>
+				<div class="small text-body-secondary">#prc.stats.projectsArchived# archived</div>
+			</div></div>
+		</div>
+		<div class="col-6 col-md-3">
+			<div class="card h-100"><div class="card-body">
+				<div class="text-body-secondary small">Open tasks</div>
+				<div class="display-6">#prc.stats.tasksOpen#</div>
+				<div class="small text-body-secondary">#prc.stats.tasksCompleted# completed</div>
+			</div></div>
+		</div>
+		<div class="col-6 col-md-3">
+			<div class="card h-100"><div class="card-body">
+				<div class="text-body-secondary small">Templates</div>
+				<div class="display-6">#prc.stats.templates#</div>
+				<div class="small text-body-secondary">project blueprints</div>
+			</div></div>
+		</div>
+		<div class="col-6 col-md-3">
+			<div class="card h-100"><div class="card-body">
+				<div class="text-body-secondary small">Embedding backlog</div>
+				<div class="display-6 #prc.stats.embedBacklog gt 0 ? "text-warning" : ""#">#prc.stats.embedBacklog#</div>
+				<div class="small text-body-secondary">tasks needing index</div>
+			</div></div>
+		</div>
+	</div>
+
+	<!--- Admin shortcuts --->
+	<div class="row g-3">
+
+		<div class="col-12 col-lg-6">
+			<div class="card h-100">
+				<div class="card-body">
+					<h2 class="h5"><i class="bi bi-file-earmark-text"></i> Project templates</h2>
+					<p class="text-body-secondary small mb-3">
+						Capture an existing project's structure (statuses, labels, custom fields, tasks, subtasks) and reuse it when creating new projects.
+					</p>
+					<a class="btn btn-primary" href="/agent/admin/pm/templates">
+						<i class="bi bi-gear"></i> Manage templates
+					</a>
+				</div>
+			</div>
+		</div>
+
+		<div class="col-12 col-lg-6">
+			<div class="card h-100">
+				<div class="card-body">
+					<h2 class="h5"><i class="bi bi-stars"></i> AI embeddings</h2>
+					<bx:if prc.aiEnabled>
+						<p class="text-body-secondary small mb-3">
+							New tasks index immediately; the host's hourly sweep catches drift. Trigger an on-demand backfill if you've imported tasks in bulk or want to refresh embeddings now.
+							<bx:if prc.stats.embedBacklog gt 0>
+								<br><span class="text-warning"><i class="bi bi-exclamation-triangle"></i> #prc.stats.embedBacklog# task<bx:if prc.stats.embedBacklog neq 1>s</bx:if> waiting to be indexed.</span>
+							</bx:if>
+						</p>
+						<form method="post" action="/agent/admin/pm/embed-backlog-ui" class="d-inline"
+							onsubmit="return confirm( 'Run the embedding backfill now? This may take a moment for large backlogs.' );">
+							<button type="submit" class="btn btn-primary">
+								<i class="bi bi-arrow-clockwise"></i> Run backfill now
+							</button>
+						</form>
+					<bx:else>
+						<p class="text-body-secondary small mb-0">
+							AI is disabled in this environment (<code>AI_ENABLED=false</code>). Embedding features and the backfill endpoint short-circuit; turn AI on in the host env and restart to enable.
+						</p>
+					</bx:if>
+				</div>
+			</div>
+		</div>
+
+	</div>
+
+	<!--- Default project template (per-tenant) --->
+	<div class="card mt-3">
+		<div class="card-body">
+			<h2 class="h5"><i class="bi bi-bullseye"></i> Default project template</h2>
+			<p class="text-body-secondary small mb-3">
+				Pick the template applied by default when an agent creates a new project in the chosen organization. Leave blank to fall back to the shared Standard Workflow.
+			</p>
+
+			<form method="get" action="/agent/admin/pm" class="row g-2 align-items-end mb-3">
+				<div class="col-12 col-md-6">
+					<label class="form-label small mb-0" for="dt-org">Organization</label>
+					<select class="form-select" id="dt-org" name="organizationId" onchange="this.form.submit()">
+						<option value="">Pick an organization...</option>
+						<bx:loop array="#prc.organizations#" item="org">
+							<option value="#encodeForHTMLAttribute( org.getId() )#" <bx:if ( prc.selectedOrgId ?: "" ) eq org.getId()>selected</bx:if>>
+								#encodeForHTML( org.getName() )#
+							</option>
+						</bx:loop>
+					</select>
+				</div>
+			</form>
+
+			<bx:if len( prc.selectedOrgId ?: "" )>
+				<form method="post" action="/agent/admin/pm/default-template" class="row g-2 align-items-end">
+					<input type="hidden" name="organizationId" value="#encodeForHTMLAttribute( prc.selectedOrgId )#">
+					<div class="col-12 col-md-8">
+						<label class="form-label small mb-0" for="dt-id">Default template</label>
+						<select class="form-select" id="dt-id" name="defaultTemplateId">
+							<option value="">(no override — use shared default)</option>
+							<bx:loop array="#prc.defaultTemplateOptions#" item="tpl">
+								<option value="#encodeForHTMLAttribute( tpl.getId() )#" <bx:if prc.defaultTemplateCurrent eq tpl.getId()>selected</bx:if>>
+									#encodeForHTML( tpl.getName() )#<bx:if !!tpl.getIsShared()> (shared)</bx:if>
+								</option>
+							</bx:loop>
+						</select>
+					</div>
+					<div class="col-12 col-md-4 text-end">
+						<button type="submit" class="btn btn-primary">
+							<i class="bi bi-save"></i> Save
+						</button>
+					</div>
+					<bx:if !arrayLen( prc.defaultTemplateOptions )>
+						<div class="col-12">
+							<p class="text-body-secondary small fst-italic mb-0">This organization has no templates to choose from. Create one under "Manage templates" above.</p>
+						</div>
+					</bx:if>
+				</form>
+			<bx:else>
+				<p class="text-body-secondary small fst-italic mb-0">Pick an organization to configure its default template.</p>
+			</bx:if>
+		</div>
+	</div>
+
+	<!--- Diagnostics --->
+	<bx:if !isNull( prc.addonRow ?: javaCast( "null", "" ) )>
+		<div class="card mt-3">
+			<div class="card-body">
+				<h2 class="h6 text-body-secondary mb-2"><i class="bi bi-info-circle"></i> Add-on status</h2>
+				<dl class="row mb-0 small">
+					<dt class="col-3 col-md-2">Addon id</dt><dd class="col-9 col-md-10"><code>#encodeForHTML( prc.addonRow.addonId ?: "" )#</code></dd>
+					<dt class="col-3 col-md-2">Display name</dt><dd class="col-9 col-md-10">#encodeForHTML( prc.addonRow.displayName ?: "" )#</dd>
+					<dt class="col-3 col-md-2">Version</dt><dd class="col-9 col-md-10"><code>#encodeForHTML( prc.addonRow.version ?: "" )#</code></dd>
+					<dt class="col-3 col-md-2">Compatible</dt>
+					<dd class="col-9 col-md-10">
+						<bx:if !!( prc.addonRow.compatible ?: false )>
+							<span class="badge text-bg-success">yes</span>
+						<bx:else>
+							<span class="badge text-bg-danger">no</span>
+							<bx:if len( prc.addonRow.compatibilityMessage ?: "" )>
+								<span class="ms-2 text-danger small">#encodeForHTML( prc.addonRow.compatibilityMessage )#</span>
+							</bx:if>
+						</bx:if>
+					</dd>
+				</dl>
+			</div>
+		</div>
+	</bx:if>
+
+</div>
+</bx:output>

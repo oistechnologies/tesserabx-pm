@@ -16,12 +16,13 @@
 
 .pm-column {
 	background: var(--bs-tertiary-bg);
-	/* Equal-width columns inside the available row. `flex: 1 1 0`
-	   makes the columns share leftover space proportionally
-	   regardless of card contents; min-width stops them collapsing
-	   below readable size. */
+	/* Equal-width columns share the available row width; no
+	   min-width floor so many statuses still fit on one screen
+	   without horizontal scrolling. Card content wraps; on very
+	   narrow viewports the parent .pm-board's overflow-x rule
+	   still kicks in as a fallback. */
 	flex: 1 1 0;
-	min-width: 240px;
+	min-width: 0;
 }
 
 .pm-column-body {
@@ -77,4 +78,67 @@
 /* Quick-add input lives in the column footer with a tighter look. */
 .pm-quick-add input[type="text"] {
 	font-size: .8rem;
+}
+
+/*
+ * Calendar icon for date inputs.
+ *
+ * AdminLTE 4 hides the WebKit calendar dropdown indicator on every
+ * date input via `::-webkit-calendar-picker-indicator { display:
+ * none !important }`. On top of that, Bootstrap's `.form-control`
+ * sets `appearance: none`, which strips the system-painted icon.
+ * Re-enabling `display: block` on the indicator exposes the click
+ * target, but the icon is gone because `appearance:none` killed it.
+ *
+ * Solution: re-paint a Bootstrap-Icons-style calendar SVG as the
+ * `background-image` of the indicator pseudo-element. Scoped to
+ * `input.form-control` so other AdminLTE date inputs are not
+ * affected by PM's contribution. Targets Chrome / Edge / Safari
+ * (WebKit pseudo-element); Firefox renders its own calendar UI
+ * regardless.
+ *
+ * SVG is the bi-calendar3 outline from Bootstrap Icons 1.11.x,
+ * stroke-colored with currentColor so it follows the surrounding
+ * text color (dark on light or light on dark themes).
+ */
+input.form-control[type="date"]::-webkit-calendar-picker-indicator,
+input.form-control[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input.form-control[type="month"]::-webkit-calendar-picker-indicator,
+input.form-control[type="week"]::-webkit-calendar-picker-indicator,
+input.form-control[type="time"]::-webkit-calendar-picker-indicator {
+	display: block !important;
+	width: 1rem;
+	height: 1rem;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23495057' viewBox='0 0 16 16'%3E%3Cpath d='M14 0H2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zM1 3.857C1 3.384 1.448 3 2 3h12c.552 0 1 .384 1 .857v10.286c0 .473-.448.857-1 .857H2c-.552 0-1-.384-1-.857V3.857z'/%3E%3Cpath d='M6.5 7a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: center;
+	background-size: 1rem 1rem;
+	opacity: .65;
+	cursor: pointer;
+	padding: 0;
+	margin-left: .25rem;
+}
+
+input.form-control[type="date"]:hover::-webkit-calendar-picker-indicator,
+input.form-control[type="datetime-local"]:hover::-webkit-calendar-picker-indicator,
+input.form-control[type="month"]:hover::-webkit-calendar-picker-indicator,
+input.form-control[type="week"]:hover::-webkit-calendar-picker-indicator,
+input.form-control[type="time"]:hover::-webkit-calendar-picker-indicator {
+	opacity: 1;
+}
+
+/*
+ * Multi-line ellipsis utility. Caps the host element at two visible
+ * lines and appends an ellipsis when overflowed. Used on the project-
+ * list description column so long descriptions never push the row
+ * taller than two lines (hover reveals the full text via the title
+ * attribute set by the consumer).
+ */
+.pm-clamp-2 {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }

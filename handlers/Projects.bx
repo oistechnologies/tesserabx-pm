@@ -31,14 +31,17 @@
 class {
 
     property name="projectService"  inject="ProjectService@tesserabx-pm";
+    property name="overviewService" inject="ProjectOverviewService@tesserabx-pm";
+    property name="labelService"    inject="LabelService@tesserabx-pm";
     property name="contactsService" inject="ContactsService@contacts";
     property name="messagebox"      inject="messagebox@cbmessagebox";
     property name="auth"            inject="AuthenticationService@cbauth";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         // Every agent-surface PM page renders inside the host's
-        // Agent layout. Setting it here once keeps the actions
-        // below focused on the data.
+        // Agent layout, EXCEPT the printable overview which uses
+        // PM's own minimal Print layout. The Print action swaps
+        // its own layout inside the action.
         event.setLayout( name = "Agent", module = "core" );
 
         // Surface viewer context to views and helper code.
@@ -87,7 +90,55 @@ class {
 
         prc.pageTitle = project.getName();
         prc.project   = project;
+        prc.labels    = labelService.listForProject( project.getId() );
         event.setView( view = "projects/show", module = "tesserabx-pm" );
+    }
+
+    /**
+     * Project overview report (Phase 13a polish). Renders the assembled
+     * read-only report inside the standard Agent layout. The "Open
+     * printable view" link on the report opens `overviewPrint` in a new
+     * window which swaps to PM's minimal Print layout for clean
+     * printing / PDF export.
+     */
+    function overview( event, rc, prc ){
+        requirePermission( prc, "pm.view" );
+
+        var project = projectService.getProject( rc.id ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = project.getName() & " — Overview";
+        prc.project   = project;
+        prc.report    = overviewService.assemble( project.getId() );
+        prc.printMode = false;
+        event.setView( view = "projects/overview", module = "tesserabx-pm" );
+    }
+
+    /**
+     * Printable variant of `overview`. Renders the same view inside
+     * PM's minimal Print layout (no sidebar, no host chrome). The
+     * Print layout adds a small toolbar (Close + Print) that hides
+     * itself via `@media print` so the on-paper output is the report
+     * only.
+     */
+    function overviewPrint( event, rc, prc ){
+        requirePermission( prc, "pm.view" );
+
+        var project = projectService.getProject( rc.id ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = project.getName() & " — Overview";
+        prc.project   = project;
+        prc.report    = overviewService.assemble( project.getId() );
+        prc.printMode = true;
+        event.setLayout( name = "Print", module = "tesserabx-pm" );
+        event.setView( view = "projects/overview", module = "tesserabx-pm" );
     }
 
     // ---------------------------------------------------------------

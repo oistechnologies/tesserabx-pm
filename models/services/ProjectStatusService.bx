@@ -62,6 +62,105 @@ class singleton=true {
         return statuses[ 1 ];
     }
 
+    // ---------------------------------------------------------------
+    // CRUD (Phase 13a polish)
+    // ---------------------------------------------------------------
+
+    /**
+     * Create a status on a project. sort_order is auto-assigned to
+     * the end of the existing list. Setting is_default=true demotes
+     * every other default on the same project so the "exactly one
+     * default" invariant is preserved.
+     */
+    public any function createStatus( required struct data ){
+        if ( !len( arguments.data.projectId      ?: "" ) ) throw( type = "ProjectStatusService.MissingField", message = "projectId is required." );
+        if ( !len( arguments.data.organizationId ?: "" ) ) throw( type = "ProjectStatusService.MissingField", message = "organizationId is required." );
+        if ( !len( trim( arguments.data.name     ?: "" ) ) ) throw( type = "ProjectStatusService.MissingField", message = "name is required." );
+
+        var s = wirebox.getInstance( "ProjectStatus@tesserabx-pm" );
+        s.setId(             createUUID() );
+        s.setProjectId(      arguments.data.projectId );
+        s.setOrganizationId( arguments.data.organizationId );
+        s.setName(           trim( arguments.data.name ) );
+        s.setColor(          trim( arguments.data.color ?: "" ) );
+        s.setSortOrder(      nextSortOrder( arguments.data.projectId ) );
+        s.setIsDefault(      !!( arguments.data.isDefault   ?: false ) );
+        s.setIsCompleted(    !!( arguments.data.isCompleted ?: false ) );
+        s.save();
+        if ( !!s.getIsDefault() ) demoteOtherDefaults( arguments.data.projectId, s.getId() );
+        return s;
+    }
+
+    /**
+     * Patch a status's mutable fields: name, color, is_default,
+     * is_completed. Flipping is_default true demotes every other
+     * default on the project.
+     */
+    public any function updateStatus( required string id, required struct data ){
+        var s = getStatus( arguments.id );
+        if ( isNull( s ) ) throw( type = "ProjectStatusService.UnknownStatus", message = "No status with id [#arguments.id#]." );
+
+        if ( structKeyExists( arguments.data, "name" ) ) {
+            var n = trim( arguments.data.name );
+            if ( !len( n ) ) throw( type = "ProjectStatusService.MissingField", message = "name cannot be blank." );
+            s.setName( n );
+        }
+        if ( structKeyExists( arguments.data, "color"      ) ) s.setColor( trim( arguments.data.color ) );
+        if ( structKeyExists( arguments.data, "isCompleted" ) ) s.setIsCompleted( !!arguments.data.isCompleted );
+        if ( structKeyExists( arguments.data, "isDefault"   ) ) s.setIsDefault(   !!arguments.data.isDefault );
+        s.save();
+        if ( !!s.getIsDefault() ) demoteOtherDefaults( s.getProjectId(), s.getId() );
+        return s;
+    }
+
+    /**
+     * Delete a status. Two guards:
+     *   - Refuse to delete the last remaining status on a project
+     *     (deleting it would leave new tasks with nothing to land in).
+     *   - Refuse to delete a status that any non-deleted task
+     *     currently references. The operator must reassign first.
+     */
+    public void function removeStatus( required string id ){
+        var s = getStatus( arguments.id );
+        if ( isNull( s ) ) throw( type = "ProjectStatusService.UnknownStatus", message = "No status with id [#arguments.id#]." );
+
+        var inUse = queryExecute(
+            "SELECT COUNT(*) AS c FROM pm_tasks WHERE status_id = :sid AND deleted_at IS NULL",
+            { sid : arguments.id }
+        );
+        if ( int( inUse.c[ 1 ] ?: 0 ) > 0 ) {
+            throw(
+                type    = "ProjectStatusService.StatusInUse",
+                message = "Cannot delete a status that has tasks assigned to it. Move the tasks to another status first."
+            );
+        }
+        var siblings = queryExecute(
+            "SELECT COUNT(*) AS c FROM pm_project_statuses WHERE project_id = :pid",
+            { pid : s.getProjectId() }
+        );
+        if ( int( siblings.c[ 1 ] ?: 0 ) <= 1 ) {
+            throw(
+                type    = "ProjectStatusService.LastStatus",
+                message = "Cannot delete the last status on a project. Add another status before removing this one."
+            );
+        }
+        queryExecute( "DELETE FROM pm_project_statuses WHERE id = :id", { id : arguments.id } );
+    }
+
+    /**
+     * Persist a new ordering. `ids` is a project-scoped array; each
+     * id receives sort_order = its (1-based) index in the array.
+     * Statuses not present in the array are not touched.
+     */
+    public void function reorderStatuses( required string projectId, required array ids ){
+        for ( var i = 1; i <= arrayLen( arguments.ids ); i++ ) {
+            queryExecute(
+                "UPDATE pm_project_statuses SET sort_order = :so WHERE id = :id AND project_id = :pid",
+                { so : i, id : arguments.ids[ i ], pid : arguments.projectId }
+            );
+        }
+    }
+
     /**
      * Hydrate pm_project_statuses for a project from a template's
      * structure_json. Idempotent: skips when the project already
@@ -125,6 +224,23 @@ class singleton=true {
             status.setIsCompleted(    !!( entry.is_completed ?: false ) );
             status.save();
         }
+    }
+
+    // ---------- internals ----------
+
+    private numeric function nextSortOrder( required string projectId ){
+        var r = queryExecute(
+            "SELECT COALESCE( MAX( sort_order ), 0 ) + 1 AS so FROM pm_project_statuses WHERE project_id = :pid",
+            { pid : arguments.projectId }
+        );
+        return int( r.so[ 1 ] ?: 1 );
+    }
+
+    private void function demoteOtherDefaults( required string projectId, required string keepId ){
+        queryExecute(
+            "UPDATE pm_project_statuses SET is_default = FALSE WHERE project_id = :pid AND id <> :kid",
+            { pid : arguments.projectId, kid : arguments.keepId }
+        );
     }
 
 }

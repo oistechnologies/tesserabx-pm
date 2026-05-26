@@ -137,7 +137,10 @@ class {
                 // claims match before the host's catch-all.
                 routeClaims : [
                     // Cross-surface landing URLs.
-                    { path : "/agent/admin/pm",           verbs : "GET", module : "tesserabx-pm", handler : "Main",            action : "index" },
+                    // Phase 13a: admin landing routes to admin.Main
+                    // (the proper admin dashboard); the Phase 0 stub
+                    // `Main` handler has been removed.
+                    { path : "/agent/admin/pm",           verbs : "GET", module : "tesserabx-pm", handler : "admin.Main",      action : "index" },
                     // Phase 7: admin templates landing. Lives in the
                     // admin surface URL space which sits outside PM's
                     // entryPoint, so it is registered here rather than
@@ -148,7 +151,13 @@ class {
                     // task embeddings on demand without waiting for
                     // the hourly sweep. Returns the per-consumer
                     // report as JSON.
-                    { path : "/agent/admin/pm/embed-backlog", verbs : "POST", module : "tesserabx-pm", handler : "admin.EmbeddingBackfill", action : "run" },
+                    { path : "/agent/admin/pm/embed-backlog",     verbs : "POST", module : "tesserabx-pm", handler : "admin.EmbeddingBackfill", action : "run"   },
+                    // Phase 13a: UI variant of embed-backlog. Same
+                    // sweep, but messageboxes the report and relocates
+                    // to the admin landing instead of returning JSON.
+                    { path : "/agent/admin/pm/embed-backlog-ui",  verbs : "POST", module : "tesserabx-pm", handler : "admin.EmbeddingBackfill", action : "runUi" },
+                    // Phase 13a: per-tenant default-template picker.
+                    { path : "/agent/admin/pm/default-template",  verbs : "POST", module : "tesserabx-pm", handler : "admin.Main",              action : "saveDefaultTemplate" },
 
                     // Phase 11: client portal surface at /pm. The
                     // Phase 0 single /pm -> Main.index claim is
@@ -239,23 +248,22 @@ class {
                     }
                 ],
                 adminPages : [
+                    // Single PM tile on the host's admin dashboard.
+                    // The landing handler (admin.Main) is the hub:
+                    // it links into Templates, the Embedding Backfill
+                    // button, and any future PM admin surfaces.
+                    // Phase 13a removed the separate "PM Templates"
+                    // tile because it duplicated what the landing
+                    // already exposes; the /agent/admin/pm/templates
+                    // route still works (routeClaim) and is reached
+                    // through the "Manage templates" button.
                     {
                         id                 : "pm.admin.landing",
                         title              : "Project Management",
-                        description        : "Configure PM templates, custom fields, and per-tenant settings.",
+                        description        : "Configure PM templates, manage AI embeddings, and inspect add-on status.",
                         route              : "/agent/admin/pm",
                         icon               : "bi bi-kanban",
                         sortWeight         : 600,
-                        requiredPermission : "pm.admin"
-                    },
-                    // Phase 7: project templates admin (snapshot + hydrate).
-                    {
-                        id                 : "pm.admin.templates",
-                        title              : "PM Templates",
-                        description        : "Manage project templates: snapshot from existing projects, edit, share, delete.",
-                        route              : "/agent/admin/pm/templates",
-                        icon               : "bi bi-file-earmark-text",
-                        sortWeight         : 610,
                         requiredPermission : "pm.admin"
                     }
                 ],
@@ -853,6 +861,17 @@ class {
               .asSingleton();
         binder.map( "SuggestionService@tesserabx-pm" )
               .to( "#moduleMapping#.models.services.SuggestionService" )
+              .asSingleton();
+        // Phase 13a: AccountLookupService reads the host's agents +
+        // contacts tables for picker dropdowns (assignee + watcher).
+        binder.map( "AccountLookupService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.AccountLookupService" )
+              .asSingleton();
+        // Phase 13a: ProjectOverviewService assembles the read-only
+        // data set behind the project overview report (both the
+        // in-layout and printable views).
+        binder.map( "ProjectOverviewService@tesserabx-pm" )
+              .to( "#moduleMapping#.models.services.ProjectOverviewService" )
               .asSingleton();
 
         // DTOs (singleton).

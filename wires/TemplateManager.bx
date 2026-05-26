@@ -25,6 +25,8 @@ class extends="cbwire.models.Component" {
         "editName"       : "",
         "editDescription" : "",
         "editIsShared"   : false,
+        // Phase 13a polish: per-template preview toggle.
+        "previewId"      : "",
         "notice"         : "",
         "noticeKind"     : "info"
     };
@@ -109,6 +111,55 @@ class extends="cbwire.models.Component" {
         } catch ( any e ) {
             notice( "Could not remove template: " & e.message, "danger" );
         }
+    }
+
+    /**
+     * Phase 13a polish: clone an existing template. Routes through
+     * TemplateService.duplicateTemplate, which preserves the snapshot
+     * structure and the shared flag.
+     */
+    function duplicate( id ){
+        try {
+            var clone = templateService.duplicateTemplate(
+                id        : arguments.id ?: "",
+                actorType : "agent",
+                actorId   : currentAgentId()
+            );
+            notice( "Template duplicated as '" & clone.getName() & "'.", "success" );
+        } catch ( any e ) {
+            notice( "Could not duplicate template: " & e.message, "danger" );
+        }
+    }
+
+    /**
+     * Phase 13a polish: toggle the snapshot preview panel for a
+     * single template. Only one preview is open at a time so the
+     * list does not grow unbounded.
+     */
+    function togglePreview( id ){
+        if ( ( data.previewId ?: "" ) == ( arguments.id ?: "" ) ) {
+            data.previewId = "";
+        } else {
+            data.previewId = arguments.id ?: "";
+        }
+    }
+
+    /**
+     * Helper: parsed snapshot for the preview panel. Returns the
+     * full deserialized structure ({ statuses, labels, custom_fields,
+     * tasks }) with sane defaults so the template can render without
+     * defensive isStruct checks.
+     */
+    function structure( required any template ){
+        var raw = arguments.template.getStructureJson() ?: "";
+        var out = { statuses : [], labels : [], custom_fields : [], tasks : [] };
+        if ( !len( raw ) ) return out;
+        try {
+            var parsed = jsonDeserialize( raw );
+            if ( !isStruct( parsed ) ) return out;
+            structAppend( out, parsed, true );
+        } catch ( any e ) {}
+        return out;
     }
 
     /**

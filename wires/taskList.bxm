@@ -134,8 +134,8 @@
                                 </td>
                                 <td>
                                     <input type="date"
-                                           class="form-control form-control-sm"
-                                           style="min-width: 9rem;"
+                                           class="form-control"
+                                           style="min-width: 11rem;"
                                            value="#encodeForHTMLAttribute( isDate( t.getDueDate() ?: '' ) ? dateFormat( t.getDueDate(), 'yyyy-mm-dd' ) : '' )#"
                                            wire:change="inlineEdit('#encodeForHTMLAttribute( local.tid )#', 'dueDate', $event.target.value)">
                                 </td>

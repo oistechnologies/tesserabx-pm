@@ -1,0 +1,244 @@
+/**
+ * ProjectOverviewService: assembles the read-only data set that
+ * powers the project overview report (Phase 13a polish).
+ *
+ * One entry point: `assemble( projectId )`. Returns a struct with
+ * everything the report view needs in one round trip:
+ *
+ *   {
+ *     project       : Project entity,
+ *     statuses      : array of ProjectStatus entities,
+ *     taskCounts    : { total, completed, open, overdue, dueSoon },
+ *     byStatus      : array of { id, name, color, count },
+ *     byPriority    : { urgent, high, medium, low } counts,
+ *     byAssignee    : array of { type, id, label, count },
+ *     subtaskStats  : { total, completed },
+ *     timeLogged    : { totalHours, billableHours },
+ *     labels        : array of { id, name, color, count },
+ *     recentEvents  : array of ProjectEventDto rows (last 10)
+ *   }
+ *
+ * No AI involvement. Pure-SQL aggregations so the call stays cheap
+ * even on projects with thousands of tasks.
+ *
+ * "Overdue" = task with a due_date strictly before today and not
+ * yet completed. "Due soon" = due within the next 7 days, not yet
+ * completed. The same convention powers the kanban SLA chip and
+ * the Phase 9b scheduler.
+ */
+class singleton=true {
+
+    property name="projectService"       inject="ProjectService@tesserabx-pm";
+    property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
+    property name="boardService"         inject="BoardService@tesserabx-pm";
+    property name="timeTracking"         inject="TimeTrackingService@tesserabx-pm";
+    property name="projectEvents"        inject="ProjectEventService@tesserabx-pm";
+    property name="accountLookup"        inject="AccountLookupService@tesserabx-pm";
+
+    public struct function assemble( required string projectId ){
+        var project = projectService.getProject( arguments.projectId );
+        if ( isNull( project ) ) return emptyReport();
+
+        var board = boardService.buildBoard( projectId : arguments.projectId );
+
+        return {
+            project        : project,
+            statuses       : board.statuses,
+            taskCounts     : taskCounts( arguments.projectId ),
+            byStatus       : tasksByStatus( arguments.projectId ),
+            byPriority     : tasksByPriority( arguments.projectId ),
+            byAssignee     : tasksByAssignee( arguments.projectId ),
+            subtaskStats   : subtaskStats( arguments.projectId ),
+            timeLogged     : timeTracking.totalsForProject( arguments.projectId ),
+            labels         : labelCounts( arguments.projectId ),
+            // Phase 13a polish: the report's "Tasks" section needs the
+            // full grouped task list (with attached labels) so it can
+            // render per-status sections with title + due + assignee
+            // + label chips. Reuses BoardService.buildBoard so the
+            // grouping, filtering, and labels-by-task batch resolver
+            // is shared with the kanban.
+            board          : { columns : board.columns, labelsByTask : board.labelsByTask },
+            assigneeLabels : resolveAssigneeLabels( board.columns )
+        };
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Walk every task in every board column, collect unique
+     * (assigneeType, assigneeId) pairs, resolve each via
+     * AccountLookupService.accountLabel once, and return a map keyed
+     * by "type:id". The view does an O(1) lookup per row.
+     */
+    private struct function resolveAssigneeLabels( required struct columns ){
+        var seen = {};
+        for ( var key in arguments.columns ) {
+            var col = arguments.columns[ key ];
+            for ( var t in ( col.tasks ?: [] ) ) {
+                var atype = t.getAssigneeType() ?: "";
+                var aid   = t.getAssigneeId()   ?: "";
+                if ( !len( atype ) || !len( aid ) ) continue;
+                var k = atype & ":" & aid;
+                if ( !structKeyExists( seen, k ) ) {
+                    seen[ k ] = accountLookup.accountLabel( atype, aid );
+                }
+            }
+        }
+        return seen;
+    }
+
+    private struct function emptyReport(){
+        return {
+            project        : javaCast( "null", "" ),
+            statuses       : [],
+            taskCounts     : { total : 0, completed : 0, open : 0, overdue : 0, dueSoon : 0 },
+            byStatus       : [],
+            byPriority     : { urgent : 0, high : 0, medium : 0, low : 0 },
+            byAssignee     : [],
+            subtaskStats   : { total : 0, completed : 0 },
+            timeLogged     : { totalHours : 0, billableHours : 0 },
+            labels         : [],
+            board          : { columns : {}, labelsByTask : {} },
+            assigneeLabels : {}
+        };
+    }
+
+    private struct function taskCounts( required string projectId ){
+        var r = queryExecute(
+            "SELECT
+                COUNT(*)                                                                              AS total,
+                COUNT(*) FILTER ( WHERE completed_at IS NOT NULL )                                    AS completed,
+                COUNT(*) FILTER ( WHERE completed_at IS NULL )                                        AS open,
+                COUNT(*) FILTER ( WHERE completed_at IS NULL AND due_date IS NOT NULL AND due_date < CURRENT_DATE )                       AS overdue,
+                COUNT(*) FILTER ( WHERE completed_at IS NULL AND due_date IS NOT NULL AND due_date >= CURRENT_DATE AND due_date <= CURRENT_DATE + 7 ) AS due_soon
+             FROM   pm_tasks
+             WHERE  project_id = :pid
+               AND  deleted_at IS NULL",
+            { pid : arguments.projectId }
+        );
+        return {
+            total     : int( r.total[ 1 ]     ?: 0 ),
+            completed : int( r.completed[ 1 ] ?: 0 ),
+            open      : int( r.open[ 1 ]      ?: 0 ),
+            overdue   : int( r.overdue[ 1 ]   ?: 0 ),
+            dueSoon   : int( r.due_soon[ 1 ]  ?: 0 )
+        };
+    }
+
+    private array function tasksByStatus( required string projectId ){
+        // pm_project_statuses has no deleted_at column (statuses
+        // cascade-delete with their project, not soft-delete), so
+        // only the joined task rows get the deleted_at filter.
+        var rows = queryExecute(
+            "SELECT s.id, s.name, s.color, s.sort_order,
+                    COUNT( t.id ) AS task_count
+             FROM   pm_project_statuses s
+             LEFT JOIN pm_tasks t
+                    ON t.status_id  = s.id
+                   AND t.deleted_at IS NULL
+             WHERE  s.project_id = :pid
+             GROUP BY s.id, s.name, s.color, s.sort_order
+             ORDER BY s.sort_order",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id    : rows.id[ i ],
+                name  : rows.name[ i ],
+                color : rows.color[ i ] ?: "",
+                count : int( rows.task_count[ i ] ?: 0 )
+            } );
+        }
+        return out;
+    }
+
+    private struct function tasksByPriority( required string projectId ){
+        var rows = queryExecute(
+            "SELECT priority, COUNT(*) AS c
+             FROM   pm_tasks
+             WHERE  project_id = :pid
+               AND  deleted_at IS NULL
+             GROUP BY priority",
+            { pid : arguments.projectId }
+        );
+        var out = { urgent : 0, high : 0, medium : 0, low : 0 };
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var p = lCase( rows.priority[ i ] ?: "" );
+            if ( structKeyExists( out, p ) ) out[ p ] = int( rows.c[ i ] ?: 0 );
+        }
+        return out;
+    }
+
+    private array function tasksByAssignee( required string projectId ){
+        var rows = queryExecute(
+            "SELECT assignee_type, assignee_id, COUNT(*) AS c
+             FROM   pm_tasks
+             WHERE  project_id = :pid
+               AND  deleted_at IS NULL
+               AND  assignee_id IS NOT NULL
+               AND  assignee_id <> ''
+             GROUP BY assignee_type, assignee_id
+             ORDER BY c DESC
+             LIMIT 25",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var atype = rows.assignee_type[ i ];
+            var aid   = rows.assignee_id[ i ];
+            out.append( {
+                type  : atype,
+                id    : aid,
+                label : accountLookup.accountLabel( atype, aid ),
+                count : int( rows.c[ i ] ?: 0 )
+            } );
+        }
+        return out;
+    }
+
+    private struct function subtaskStats( required string projectId ){
+        var r = queryExecute(
+            "SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER ( WHERE s.is_completed = TRUE ) AS completed
+             FROM   pm_subtasks s
+             JOIN   pm_tasks    t ON t.id = s.task_id
+             WHERE  t.project_id = :pid
+               AND  s.deleted_at IS NULL
+               AND  t.deleted_at IS NULL",
+            { pid : arguments.projectId }
+        );
+        return {
+            total     : int( r.total[ 1 ]     ?: 0 ),
+            completed : int( r.completed[ 1 ] ?: 0 )
+        };
+    }
+
+    private array function labelCounts( required string projectId ){
+        // pm_labels has no deleted_at column (labels cascade-delete
+        // with their project, not soft-delete); only the joined tasks
+        // get the deleted_at filter.
+        var rows = queryExecute(
+            "SELECT l.id, l.name, l.color, COUNT( t.id ) AS c
+             FROM   pm_labels l
+             LEFT JOIN pm_task_labels tl ON tl.label_id = l.id
+             LEFT JOIN pm_tasks       t  ON t.id = tl.task_id AND t.deleted_at IS NULL
+             WHERE  l.project_id = :pid
+             GROUP BY l.id, l.name, l.color
+             ORDER BY c DESC, l.name",
+            { pid : arguments.projectId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id    : rows.id[ i ],
+                name  : rows.name[ i ],
+                color : rows.color[ i ] ?: "",
+                count : int( rows.c[ i ] ?: 0 )
+            } );
+        }
+        return out;
+    }
+
+}

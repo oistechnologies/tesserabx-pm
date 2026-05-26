@@ -1,0 +1,39 @@
+<bx:output>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>#encodeForHTML( prc.pageTitle ?: "Project overview" )#</title>
+	<!--- Bootstrap CSS via AdminLTE bundle so the report looks the
+	      same on-screen as the rest of the agent UI before printing. --->
+	<link rel="stylesheet" href="/includes/vendor/bootstrap-icons-1.11.3/bootstrap-icons.css">
+	<link rel="stylesheet" href="/includes/vendor/adminlte-4.0.0-rc7/css/adminlte.min.css">
+	<style>
+		body { padding: 1.25rem; background: ##fff; }
+		.pm-print-toolbar { margin-bottom: 1rem; }
+		@media print {
+			.pm-print-toolbar, .no-print { display: none !important; }
+			.card { border: 1px solid ##dee2e6 !important; break-inside: avoid; }
+			body  { padding: 0; }
+		}
+	</style>
+</head>
+<body>
+
+<div class="pm-print-toolbar d-flex justify-content-between align-items-center">
+	<a href="javascript:window.close()" class="btn btn-sm btn-outline-secondary">
+		<i class="bi bi-x-lg"></i> Close
+	</a>
+	<div class="d-flex gap-2">
+		<button type="button" class="btn btn-sm btn-primary" onclick="window.print();">
+			<i class="bi bi-printer"></i> Print
+		</button>
+	</div>
+</div>
+
+#renderView()#
+
+</body>
+</html>
+</bx:output>

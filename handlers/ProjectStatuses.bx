@@ -1,0 +1,29 @@
+/**
+ * Agent-surface ProjectStatuses handler. Mounts the StatusManager
+ * wire at /agent/pm/projects/:projectId/statuses (Phase 13a polish).
+ *
+ * Single index action; the wire owns the CRUD lifecycle (add, edit,
+ * delete, reorder).
+ */
+class {
+
+    property name="projectService" inject="ProjectService@tesserabx-pm";
+    property name="messagebox"     inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        var project = projectService.getProject( rc.projectId ?: "" );
+        if ( isNull( project ) ) {
+            messagebox.warn( "That project does not exist." );
+            relocate( uri = "/agent/pm/projects" );
+            return;
+        }
+        prc.pageTitle = "Statuses — " & project.getName();
+        prc.project   = project;
+        event.setView( view = "projectStatuses/index", module = "tesserabx-pm" );
+    }
+
+}

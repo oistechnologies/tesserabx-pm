@@ -16,10 +16,12 @@ class extends="cbwire.models.Component" {
         "projectId"      : "",
         "organizationId" : "",
         "newName"        : "",
-        "newColor"       : "",
+        // type="color" inputs require a 7-char #rrggbb value; default
+        // to Bootstrap's primary so a fresh form is a valid color.
+        "newColor"       : "##0d6efd",
         "editingId"      : "",
         "editName"       : "",
-        "editColor"      : "",
+        "editColor"      : "##0d6efd",
         "notice"         : "",
         "noticeKind"     : "info"
     };
@@ -48,7 +50,7 @@ class extends="cbwire.models.Component" {
                 color          : trim( data.newColor ?: "" )
             } );
             data.newName  = "";
-            data.newColor = "";
+            data.newColor = "##0d6efd";
             notice( "Label added.", "success" );
         } catch ( any e ) {
             notice( "Could not add label: " & e.message, "danger" );
@@ -60,13 +62,22 @@ class extends="cbwire.models.Component" {
         if ( isNull( l ) ) return;
         data.editingId = l.getId();
         data.editName  = l.getName();
-        data.editColor = l.getColor() ?: "";
+        // The HTML5 color input requires a #rrggbb value; if the
+        // stored color is empty or non-hex (legacy free-form values),
+        // fall back to a sensible default rather than leaving the
+        // input rejecting the value.
+        var existing   = l.getColor() ?: "";
+        data.editColor = isHexColor( existing ) ? existing : "##0d6efd";
     }
 
     function cancelEdit(){
         data.editingId = "";
         data.editName  = "";
-        data.editColor = "";
+        data.editColor = "##0d6efd";
+    }
+
+    private boolean function isHexColor( required string raw ){
+        return reFindNoCase( "^##[0-9a-f]{6}$", arguments.raw ) > 0;
     }
 
     function saveEdit(){

@@ -3,6 +3,7 @@
     local.rows    = watchers();
     local.me      = viewer();
     local.amWatch = isWatching();
+    local.options = accountOptions();
 </bx:script>
 
 <div class="card" data-pm-wire-id="#_getID()#">
@@ -35,8 +36,7 @@
                     <li class="d-flex justify-content-between align-items-center small py-1">
                         <span>
                             <bx:if w.getWatcherType() eq "agent"><i class="bi bi-person-badge"></i><bx:else><i class="bi bi-person"></i></bx:if>
-                            #encodeForHTML( w.getWatcherType() )#
-                            <code class="ms-1 text-body-secondary">#encodeForHTML( left( w.getWatcherId(), 8 ) )#…</code>
+                            #encodeForHTML( watcherLabel( w.getWatcherType(), w.getWatcherId() ) )#
                             <bx:if w.getWatcherType() eq local.me.accountType and w.getWatcherId() eq local.me.accountId>
                                 <span class="badge text-bg-light border ms-1">you</span>
                             </bx:if>
@@ -54,13 +54,21 @@
         <form wire:submit.prevent="addWatcher" class="border-top pt-2 mt-2">
             <label class="form-label small text-body-secondary mb-1">Add a watcher</label>
             <div class="d-flex gap-1">
-                <select class="form-select form-select-sm" wire:model="newWatcherType" style="max-width: 6.5rem;">
+                <select class="form-select form-select-sm" wire:model.live="newWatcherType" style="max-width: 6.5rem;">
                     <option value="agent">agent</option>
                     <option value="contact">contact</option>
                 </select>
-                <input type="text" class="form-control form-control-sm font-monospace" wire:model="newWatcherId" placeholder="UUID" maxlength="36">
+                <select class="form-select form-select-sm" wire:model="newWatcherId">
+                    <option value="">Pick an account...</option>
+                    <bx:loop array="#local.options#" item="opt">
+                        <option value="#encodeForHTMLAttribute( opt.id )#">#encodeForHTML( opt.label )#</option>
+                    </bx:loop>
+                </select>
                 <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg"></i></button>
             </div>
+            <bx:if !arrayLen( local.options )>
+                <p class="text-body-secondary small fst-italic mt-1 mb-0">No #encodeForHTML( data.newWatcherType )#s available.</p>
+            </bx:if>
         </form>
     </div>
 </div>

@@ -30,6 +30,7 @@ class extends="cbwire.models.Component" {
     property name="taskService"          inject="TaskService@tesserabx-pm";
     property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
     property name="labelService"         inject="LabelService@tesserabx-pm";
+    property name="commentService"       inject="CommentService@tesserabx-pm";
     property name="auth"                 inject="AuthenticationService@cbauth";
 
     data = {
@@ -40,6 +41,9 @@ class extends="cbwire.models.Component" {
         "assigneeId"    : "",
         "labelIds"      : [],
         "detailTaskId"  : "",
+        // Quick-comment composer state on the off-canvas (Phase 13a polish).
+        "quickComment"  : "",
+        "quickInternal" : true,
         "notice"        : "",
         "noticeKind"    : "info"
     };
@@ -135,32 +139,49 @@ class extends="cbwire.models.Component" {
     }
 
     function openDetail( taskId ){
-        data.detailTaskId = arguments.taskId ?: "";
+        data.detailTaskId  = arguments.taskId ?: "";
+        // Reset the composer when opening a different task.
+        data.quickComment  = "";
+        data.quickInternal = true;
     }
 
     function closeDetail(){
-        data.detailTaskId = "";
+        data.detailTaskId  = "";
+        data.quickComment  = "";
+        data.quickInternal = true;
     }
 
     /**
-     * Persist edits from the TaskDetail offcanvas. Patch struct
-     * shape mirrors TaskService.updateTask; the template only
-     * forwards fields the user actually touched.
+     * Off-canvas quick-comment composer (Phase 13a polish). Routes
+     * through the same CommentService.createComment used by the full
+     * CommentThread wire, so mention parsing, watcher auto-add,
+     * `onPmCommentAdded` event, and downstream notifications all fire
+     * the same way. Visibility toggle defaults to internal to match
+     * the Comment thread composer.
      */
-    function saveDetail( required struct patch = {} ){
+    function postQuickComment(){
+        var body = trim( data.quickComment ?: "" );
+        if ( !len( body ) ) return;
         if ( !len( data.detailTaskId ) ) return;
         try {
-            var cleanPatch = arguments.patch;
-            cleanPatch.actorType = "agent";
-            cleanPatch.actorId   = currentAgentId();
-            taskService.updateTask( data.detailTaskId, cleanPatch );
-            notice( "Task updated.", "success" );
-            // Close the offcanvas on success so the user lands back
-            // on the board with the new state visible. Errors leave
-            // it open so they can correct the input and retry.
-            data.detailTaskId = "";
+            var task = taskService.getTask( data.detailTaskId );
+            if ( isNull( task ) ) {
+                notice( "Cannot post; task vanished.", "danger" );
+                return;
+            }
+            commentService.createComment( {
+                commentableType : "task",
+                commentableId   : task.getId(),
+                organizationId  : task.getOrganizationId(),
+                authorType      : "agent",
+                authorId        : currentAgentId(),
+                body            : body,
+                isInternal      : !!data.quickInternal
+            } );
+            data.quickComment = "";
+            notice( "Comment posted.", "success" );
         } catch ( any e ) {
-            notice( "Could not save task: " & e.message, "danger" );
+            notice( "Could not post comment: " & e.message, "danger" );
         }
     }
 

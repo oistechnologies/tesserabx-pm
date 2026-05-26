@@ -26,6 +26,7 @@ class {
     property name="projectStatusService" inject="ProjectStatusService@tesserabx-pm";
     property name="boardService"         inject="BoardService@tesserabx-pm";
     property name="contactsService"      inject="ContactsService@contacts";
+    property name="accountLookup"        inject="AccountLookupService@tesserabx-pm";
     property name="messagebox"           inject="messagebox@cbmessagebox";
     property name="auth"                 inject="AuthenticationService@cbauth";
 
@@ -115,10 +116,12 @@ class {
             return;
         }
 
-        prc.pageTitle  = "New task in " & project.getName();
-        prc.project    = project;
-        prc.statuses   = projectStatusService.listForProject( project.getId() );
-        prc.formData   = formDataDefaults( rc );
+        prc.pageTitle      = "New task in " & project.getName();
+        prc.project        = project;
+        prc.statuses       = projectStatusService.listForProject( project.getId() );
+        prc.formData       = formDataDefaults( rc );
+        prc.assigneeAgents   = accountLookup.listAgents();
+        prc.assigneeContacts = accountLookup.listContactsForOrganization( project.getOrganizationId() );
         prc.formErrors = prc.formErrors ?: [];
         event.setView( view = "tasks/new", module = "tesserabx-pm" );
     }
@@ -180,9 +183,11 @@ class {
             relocate( uri = "/agent/pm/tasks/" & task.getId() );
         } catch ( any e ) {
             messagebox.error( e.message );
-            prc.project    = project;
-            prc.statuses   = projectStatusService.listForProject( project.getId() );
-            prc.formData   = data;
+            prc.project          = project;
+            prc.statuses         = projectStatusService.listForProject( project.getId() );
+            prc.formData         = data;
+            prc.assigneeAgents   = accountLookup.listAgents();
+            prc.assigneeContacts = accountLookup.listContactsForOrganization( project.getOrganizationId() );
             prc.formErrors = [ { field : "", message : e.message } ];
             event.setView( view = "tasks/new", module = "tesserabx-pm" );
         }
@@ -197,11 +202,13 @@ class {
         }
         var project = projectService.getProject( task.getProjectId() );
 
-        prc.pageTitle  = "Edit task";
-        prc.task       = task;
-        prc.project    = project;
-        prc.statuses   = projectStatusService.listForProject( task.getProjectId() );
-        prc.formData   = taskToFormData( task );
+        prc.pageTitle        = "Edit task";
+        prc.task             = task;
+        prc.project          = project;
+        prc.statuses         = projectStatusService.listForProject( task.getProjectId() );
+        prc.formData         = taskToFormData( task );
+        prc.assigneeAgents   = accountLookup.listAgents();
+        prc.assigneeContacts = accountLookup.listContactsForOrganization( project.getOrganizationId() );
         prc.formErrors = prc.formErrors ?: [];
         event.setView( view = "tasks/edit", module = "tesserabx-pm" );
     }
@@ -225,10 +232,12 @@ class {
         } catch ( any e ) {
             messagebox.error( e.message );
             var project   = projectService.getProject( task.getProjectId() );
-            prc.task      = task;
-            prc.project   = project;
-            prc.statuses  = projectStatusService.listForProject( task.getProjectId() );
-            prc.formData  = data;
+            prc.task             = task;
+            prc.project          = project;
+            prc.statuses         = projectStatusService.listForProject( task.getProjectId() );
+            prc.formData         = data;
+            prc.assigneeAgents   = accountLookup.listAgents();
+            prc.assigneeContacts = accountLookup.listContactsForOrganization( project.getOrganizationId() );
             prc.formErrors = [ { field : "", message : e.message } ];
             event.setView( view = "tasks/edit", module = "tesserabx-pm" );
         }
@@ -304,13 +313,19 @@ class {
     }
 
     private struct function collectFormData( required struct rc ){
+        // Phase 13a: assignee picker now posts a single `assigneeChoice`
+        // value of "<type>:<id>" (or "" for unassigned). Split it back
+        // into (assigneeType, assigneeId) so the service contract is
+        // unchanged. If a legacy form still posts the split fields,
+        // honor those as a fallback.
+        var assignee = splitAssigneeChoice( arguments.rc.assigneeChoice ?: "" );
         return {
             title             : trim( arguments.rc.title             ?: "" ),
             description       : arguments.rc.description             ?: "",
             statusId          : arguments.rc.statusId                ?: "",
             priority          : arguments.rc.priority                ?: "medium",
-            assigneeType      : arguments.rc.assigneeType            ?: "",
-            assigneeId        : arguments.rc.assigneeId              ?: "",
+            assigneeType      : len( assignee.type ) ? assignee.type : ( arguments.rc.assigneeType ?: "" ),
+            assigneeId        : len( assignee.id   ) ? assignee.id   : ( arguments.rc.assigneeId   ?: "" ),
             startDate         : len( arguments.rc.startDate ?: "" ) ? arguments.rc.startDate : "",
             dueDate           : len( arguments.rc.dueDate   ?: "" ) ? arguments.rc.dueDate   : "",
             estimatedHours    : isNumeric( arguments.rc.estimatedHours ?: "" ) ? arguments.rc.estimatedHours : "",
@@ -320,13 +335,16 @@ class {
     }
 
     private struct function formDataDefaults( required struct rc ){
+        var type = arguments.rc.assigneeType ?: "";
+        var id   = arguments.rc.assigneeId   ?: "";
         return {
             title           : arguments.rc.title           ?: "",
             description     : arguments.rc.description     ?: "",
             statusId        : arguments.rc.statusId        ?: "",
             priority        : arguments.rc.priority        ?: "medium",
-            assigneeType    : arguments.rc.assigneeType    ?: "",
-            assigneeId      : arguments.rc.assigneeId      ?: "",
+            assigneeType    : type,
+            assigneeId      : id,
+            assigneeChoice  : ( len( type ) && len( id ) ) ? ( type & ":" & id ) : "",
             startDate       : arguments.rc.startDate       ?: "",
             dueDate         : arguments.rc.dueDate         ?: "",
             estimatedHours  : arguments.rc.estimatedHours  ?: "",
@@ -336,18 +354,32 @@ class {
     }
 
     private struct function taskToFormData( required any task ){
+        var type = arguments.task.getAssigneeType() ?: "";
+        var id   = arguments.task.getAssigneeId()   ?: "";
         return {
             title           : arguments.task.getTitle()           ?: "",
             description     : arguments.task.getDescription()     ?: "",
             statusId        : arguments.task.getStatusId()        ?: "",
             priority        : arguments.task.getPriority()        ?: "medium",
-            assigneeType    : arguments.task.getAssigneeType()    ?: "",
-            assigneeId      : arguments.task.getAssigneeId()      ?: "",
+            assigneeType    : type,
+            assigneeId      : id,
+            assigneeChoice  : ( len( type ) && len( id ) ) ? ( type & ":" & id ) : "",
             startDate       : toString( arguments.task.getStartDate()      ?: "" ),
             dueDate         : toString( arguments.task.getDueDate()        ?: "" ),
             estimatedHours  : arguments.task.getEstimatedHours()  ?: "",
             isClientVisible : !!arguments.task.getIsClientVisible(),
             sortOrder       : int( val( arguments.task.getSortOrder() ?: 0 ) )
+        };
+    }
+
+    private struct function splitAssigneeChoice( required string raw ){
+        var v = trim( arguments.raw );
+        if ( !len( v ) ) return { type : "", id : "" };
+        var idx = find( ":", v );
+        if ( !idx ) return { type : "", id : "" };
+        return {
+            type : left( v, idx - 1 ),
+            id   : mid( v, idx + 1, 1024 )
         };
     }
 

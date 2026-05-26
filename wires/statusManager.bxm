@@ -1,0 +1,100 @@
+<bx:output>
+<bx:script>
+    local.statuses = statuses();
+</bx:script>
+
+<div class="card" data-pm-wire-id="#_getID()#">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0">Statuses <span class="badge text-bg-secondary">#arrayLen( local.statuses )#</span></h2>
+        </div>
+
+        <bx:if len( notice )>
+            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+                <span>#encodeForHTML( notice )#</span>
+                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+            </div>
+        </bx:if>
+
+        <form wire:submit.prevent="add" class="row g-2 align-items-end mb-3">
+            <div class="col-12 col-md-4">
+                <label class="form-label small mb-0" for="sm-name">New status</label>
+                <input id="sm-name" type="text" class="form-control form-control-sm" wire:model="newName" maxlength="100" placeholder="e.g. Blocked, QA, Released">
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0" for="sm-color">Color</label>
+                <input id="sm-color" type="color" class="form-control form-control-color form-control-sm w-100" wire:model="newColor" title="Pick a color">
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="form-check form-switch">
+                    <input id="sm-default" class="form-check-input" type="checkbox" wire:model="newIsDefault">
+                    <label class="form-check-label small" for="sm-default">Default</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input id="sm-completed" class="form-check-input" type="checkbox" wire:model="newIsCompleted">
+                    <label class="form-check-label small" for="sm-completed">Completed</label>
+                </div>
+            </div>
+            <div class="col-12 col-md-4 text-end">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Add status</button>
+            </div>
+        </form>
+
+        <bx:if !arrayLen( local.statuses )>
+            <p class="text-body-secondary small fst-italic mb-0">No statuses yet.</p>
+        <bx:else>
+            <ul class="list-unstyled mb-0">
+                <bx:loop array="#local.statuses#" item="s">
+                    <li class="border-top pt-2 pb-2">
+                        <bx:if data.editingId eq s.getId()>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-12 col-md-4">
+                                    <input type="text" class="form-control form-control-sm" wire:model="editName">
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    <input type="color" class="form-control form-control-color form-control-sm w-100" wire:model="editColor">
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" wire:model="editIsDefault" id="sm-edit-default-#encodeForHTMLAttribute( s.getId() )#">
+                                        <label class="form-check-label small" for="sm-edit-default-#encodeForHTMLAttribute( s.getId() )#">Default</label>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" wire:model="editIsCompleted" id="sm-edit-completed-#encodeForHTMLAttribute( s.getId() )#">
+                                        <label class="form-check-label small" for="sm-edit-completed-#encodeForHTMLAttribute( s.getId() )#">Completed</label>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-md-3 d-flex gap-1 justify-content-end">
+                                    <button class="btn btn-sm btn-primary" wire:click="saveEdit()"><i class="bi bi-check-lg"></i></button>
+                                    <button class="btn btn-sm btn-outline-secondary" wire:click="cancelEdit()"><i class="bi bi-x-lg"></i></button>
+                                </div>
+                            </div>
+                        <bx:else>
+                            <div class="d-flex justify-content-between align-items-center gap-2">
+                                <div>
+                                    <span class="badge"
+                                        <bx:if len( s.getColor() ?: "" )> style="background-color: #encodeForHTMLAttribute( s.getColor() )#;"<bx:else> style="background-color: var(--bs-secondary);"</bx:if>>
+                                        #encodeForHTML( s.getName() )#
+                                    </span>
+                                    <bx:if !!s.getIsDefault()>
+                                        <span class="badge text-bg-info ms-1"><i class="bi bi-star-fill"></i> default</span>
+                                    </bx:if>
+                                    <bx:if !!s.getIsCompleted()>
+                                        <span class="badge text-bg-success ms-1"><i class="bi bi-check-circle"></i> completed</span>
+                                    </bx:if>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-link btn-sm p-0" wire:click="moveUp('#encodeForHTMLAttribute( s.getId() )#')" title="Move up"><i class="bi bi-arrow-up"></i></button>
+                                    <button class="btn btn-link btn-sm p-0" wire:click="moveDown('#encodeForHTMLAttribute( s.getId() )#')" title="Move down"><i class="bi bi-arrow-down"></i></button>
+                                    <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( s.getId() )#')" title="Edit"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( s.getId() )#')" wire:confirm="Delete this status? It must not have any tasks assigned to it." title="Delete"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </div>
+                        </bx:if>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

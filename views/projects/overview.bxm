@@ -1,0 +1,340 @@
+<bx:output>
+<bx:script>
+    local.r       = prc.report ?: {};
+    local.project = local.r.project ?: javaCast( "null", "" );
+    local.isPrint = !!( prc.printMode ?: false );
+
+    function priorityBadge( required string p ){
+        switch ( arguments.p ) {
+            case "urgent": return "danger";
+            case "high":   return "warning";
+            case "medium": return "secondary";
+            case "low":    return "info";
+            default:       return "secondary";
+        }
+    }
+</bx:script>
+
+<bx:if isNull( local.project )>
+    <div class="container-fluid">
+        <div class="alert alert-warning">Project not found.</div>
+    </div>
+<bx:else>
+    <div class="container-fluid">
+
+        <!--- Toolbar. Hidden in print preview / printing. --->
+        <bx:if !local.isPrint>
+            <nav aria-label="breadcrumb" class="mb-2">
+                <ol class="breadcrumb mb-0 small">
+                    <li class="breadcrumb-item"><a href="/agent/pm/projects" class="link-secondary">Projects</a></li>
+                    <li class="breadcrumb-item"><a href="/agent/pm/projects/#encodeForURL( local.project.getId() )#" class="link-secondary">#encodeForHTML( local.project.getName() )#</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Overview</li>
+                </ol>
+            </nav>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h1 class="fs-3 mb-0">#encodeForHTML( local.project.getName() )# &mdash; Overview</h1>
+                <a class="btn btn-outline-primary" href="/agent/pm/projects/#encodeForURL( local.project.getId() )#/overview/print" target="_blank" rel="noopener">
+                    <i class="bi bi-printer"></i> Open printable view
+                </a>
+            </div>
+        <bx:else>
+            <h1 class="fs-3 mb-1">#encodeForHTML( local.project.getName() )#</h1>
+            <p class="text-body-secondary mb-3 small">Project overview &mdash; generated #dateTimeFormat( now(), "yyyy-mm-dd HH:nn" )#</p>
+        </bx:if>
+
+        <!--- Header card: meta + description --->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-12 col-md-8">
+                        <bx:if len( local.project.getDescription() ?: "" )>
+                            <p class="mb-0" style="white-space: pre-wrap;">#encodeForHTML( local.project.getDescription() )#</p>
+                        <bx:else>
+                            <p class="text-body-secondary fst-italic mb-0">No description.</p>
+                        </bx:if>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <dl class="row mb-0 small">
+                            <dt class="col-5">Status</dt>
+                            <dd class="col-7">
+                                <bx:if local.project.getLifecycleStatus() eq "active">
+                                    <span class="badge text-bg-success">active</span>
+                                <bx:elseif local.project.getLifecycleStatus() eq "archived">
+                                    <span class="badge text-bg-secondary">archived</span>
+                                <bx:else>
+                                    <span class="badge text-bg-info">#encodeForHTML( local.project.getLifecycleStatus() )#</span>
+                                </bx:if>
+                            </dd>
+                            <dt class="col-5">Visibility</dt>
+                            <dd class="col-7">
+                                <bx:if local.project.getVisibilityScope() eq "all_org_members">
+                                    All org members
+                                <bx:elseif local.project.getVisibilityScope() eq "specific_members">
+                                    Specific members only
+                                <bx:else>
+                                    #encodeForHTML( local.project.getVisibilityScope() )#
+                                </bx:if>
+                            </dd>
+                            <dt class="col-5">Start</dt>
+                            <dd class="col-7"><bx:if isDate( local.project.getStartDate() ?: "" )>#dateFormat( local.project.getStartDate(), "yyyy-mm-dd" )#<bx:else>&mdash;</bx:if></dd>
+                            <dt class="col-5">End</dt>
+                            <dd class="col-7"><bx:if isDate( local.project.getEndDate() ?: "" )>#dateFormat( local.project.getEndDate(), "yyyy-mm-dd" )#<bx:else>&mdash;</bx:if></dd>
+                            <dt class="col-5">Created</dt>
+                            <dd class="col-7"><bx:if isDate( local.project.getCreatedAt() ?: "" )>#dateFormat( local.project.getCreatedAt(), "yyyy-mm-dd" )#</bx:if></dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!--- Headline stats --->
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+                <div class="card h-100"><div class="card-body">
+                    <div class="text-body-secondary small">Tasks total</div>
+                    <div class="display-6">#local.r.taskCounts.total#</div>
+                    <div class="small text-body-secondary">#local.r.taskCounts.completed# completed &middot; #local.r.taskCounts.open# open</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card h-100"><div class="card-body">
+                    <div class="text-body-secondary small">Overdue</div>
+                    <div class="display-6 #local.r.taskCounts.overdue gt 0 ? "text-danger" : ""#">#local.r.taskCounts.overdue#</div>
+                    <div class="small text-body-secondary">#local.r.taskCounts.dueSoon# due within 7d</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card h-100"><div class="card-body">
+                    <div class="text-body-secondary small">Subtasks</div>
+                    <div class="display-6">#local.r.subtaskStats.completed# / #local.r.subtaskStats.total#</div>
+                    <div class="small text-body-secondary">completed</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card h-100"><div class="card-body">
+                    <div class="text-body-secondary small">Time logged</div>
+                    <div class="display-6">#numberFormat( local.r.timeLogged.totalHours ?: 0, "0.00" )#<span class="fs-6 text-body-secondary"> h</span></div>
+                    <div class="small text-success"><bx:if ( local.r.timeLogged.billableHours ?: 0 ) gt 0>#numberFormat( local.r.timeLogged.billableHours, "0.00" )# h billable</bx:if></div>
+                </div></div>
+            </div>
+        </div>
+
+        <div class="row g-3">
+
+            <!--- Tasks by status --->
+            <div class="col-12 col-lg-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h2 class="h6 text-body-secondary mb-2"><i class="bi bi-kanban"></i> Tasks by status</h2>
+                        <bx:if !arrayLen( local.r.byStatus )>
+                            <p class="text-body-secondary fst-italic small mb-0">No statuses configured.</p>
+                        <bx:else>
+                            <ul class="list-unstyled mb-0">
+                                <bx:loop array="#local.r.byStatus#" item="s">
+                                    <li class="d-flex justify-content-between align-items-center py-1 border-top">
+                                        <span>
+                                            <span class="badge"
+                                                <bx:if len( s.color )> style="background-color: #encodeForHTMLAttribute( s.color )#;"<bx:else> style="background-color: var(--bs-secondary);"</bx:if>>
+                                                #encodeForHTML( s.name )#
+                                            </span>
+                                        </span>
+                                        <strong>#s.count#</strong>
+                                    </li>
+                                </bx:loop>
+                            </ul>
+                        </bx:if>
+                    </div>
+                </div>
+            </div>
+
+            <!--- Tasks by priority --->
+            <div class="col-12 col-lg-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h2 class="h6 text-body-secondary mb-2"><i class="bi bi-exclamation-triangle"></i> Tasks by priority</h2>
+                        <ul class="list-unstyled mb-0">
+                            <bx:loop array="#[ "urgent", "high", "medium", "low" ]#" item="p">
+                                <li class="d-flex justify-content-between align-items-center py-1 border-top">
+                                    <span><span class="badge text-bg-#priorityBadge( p )#">#p#</span></span>
+                                    <strong>#local.r.byPriority[ p ] ?: 0#</strong>
+                                </li>
+                            </bx:loop>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!--- Tasks by assignee --->
+            <div class="col-12 col-lg-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h2 class="h6 text-body-secondary mb-2"><i class="bi bi-people"></i> Tasks by assignee</h2>
+                        <bx:if !arrayLen( local.r.byAssignee )>
+                            <p class="text-body-secondary fst-italic small mb-0">No assigned tasks yet.</p>
+                        <bx:else>
+                            <ul class="list-unstyled mb-0">
+                                <bx:loop array="#local.r.byAssignee#" item="a">
+                                    <li class="d-flex justify-content-between align-items-center py-1 border-top">
+                                        <span>
+                                            <bx:if a.type eq "agent"><i class="bi bi-person-badge"></i><bx:else><i class="bi bi-person"></i></bx:if>
+                                            #encodeForHTML( a.label )#
+                                        </span>
+                                        <strong>#a.count#</strong>
+                                    </li>
+                                </bx:loop>
+                            </ul>
+                        </bx:if>
+                    </div>
+                </div>
+            </div>
+
+            <!--- Labels --->
+            <div class="col-12 col-lg-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h2 class="h6 text-body-secondary mb-2"><i class="bi bi-tag"></i> Labels</h2>
+                        <bx:if !arrayLen( local.r.labels )>
+                            <p class="text-body-secondary fst-italic small mb-0">No labels configured.</p>
+                        <bx:else>
+                            <ul class="list-unstyled mb-0">
+                                <bx:loop array="#local.r.labels#" item="l">
+                                    <li class="d-flex justify-content-between align-items-center py-1 border-top">
+                                        <span class="badge rounded-pill"
+                                            <bx:if len( l.color )> style="background-color: #encodeForHTMLAttribute( l.color )#;"<bx:else> style="background-color: var(--bs-secondary);"</bx:if>>
+                                            #encodeForHTML( l.name )#
+                                        </span>
+                                        <strong>#l.count#</strong>
+                                    </li>
+                                </bx:loop>
+                            </ul>
+                        </bx:if>
+                    </div>
+                </div>
+            </div>
+
+            <!--- Tasks grouped by status. One card per status with a
+                  task list inside. Empty statuses are skipped. The
+                  unassigned-status bucket renders last as "No status". --->
+            <div class="col-12">
+                <bx:script>
+                    local.columns = local.r.board.columns ?: {};
+                    local.labelsByTask  = local.r.board.labelsByTask ?: {};
+                    local.assigneeLabel = local.r.assigneeLabels ?: {};
+                </bx:script>
+
+                <bx:loop array="#local.r.statuses#" item="status">
+                    <bx:set local.col      = local.columns[ status.getId() ] ?: { tasks : [] } >
+                    <bx:set local.colTasks = local.col.tasks ?: [] >
+                    <bx:if arrayLen( local.colTasks )>
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                                <h2 class="h6 mb-0">
+                                    <span class="badge"
+                                        <bx:if len( status.getColor() ?: "" )> style="background-color: #encodeForHTMLAttribute( status.getColor() )#;"<bx:else> style="background-color: var(--bs-secondary);"</bx:if>>
+                                        #encodeForHTML( status.getName() )#
+                                    </span>
+                                    <span class="text-body-secondary ms-2 small">#arrayLen( local.colTasks )# task<bx:if arrayLen( local.colTasks ) neq 1>s</bx:if></span>
+                                </h2>
+                            </div>
+                            <div class="card-body p-0">
+                                <ul class="list-unstyled mb-0">
+                                    <bx:loop array="#local.colTasks#" item="t">
+                                        <bx:set local.tid = t.getId() >
+                                        <li class="border-top px-3 py-2">
+                                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                                <div class="flex-grow-1">
+                                                    <a href="/agent/pm/tasks/#encodeForURL( local.tid )#" class="text-decoration-none">
+                                                        <strong>#encodeForHTML( t.getTitle() )#</strong>
+                                                    </a>
+                                                    <bx:if len( toString( t.getCompletedAt() ?: "" ) )>
+                                                        <span class="badge text-bg-success ms-2"><i class="bi bi-check-circle"></i> completed</span>
+                                                    </bx:if>
+                                                </div>
+                                                <span class="badge text-bg-#priorityBadge( t.getPriority() ?: "medium" )#">#encodeForHTML( t.getPriority() ?: "medium" )#</span>
+                                            </div>
+
+                                            <bx:set local.tlabels = local.labelsByTask[ local.tid ] ?: [] >
+                                            <bx:if arrayLen( local.tlabels )>
+                                                <div class="mt-1">
+                                                    <bx:loop array="#local.tlabels#" item="lbl">
+                                                        <span class="badge rounded-pill me-1"
+                                                              style="font-size: .7rem; <bx:if len( lbl.color )>background-color: #encodeForHTMLAttribute( lbl.color )#;<bx:else>background-color: var(--bs-secondary);</bx:if>">
+                                                            #encodeForHTML( lbl.name )#
+                                                        </span>
+                                                    </bx:loop>
+                                                </div>
+                                            </bx:if>
+
+                                            <div class="small text-body-secondary mt-1 d-flex gap-3 flex-wrap">
+                                                <bx:if len( toString( t.getDueDate() ?: "" ) )>
+                                                    <span <bx:if isDate( t.getDueDate() ?: "" ) and t.getDueDate() lt now() and !len( toString( t.getCompletedAt() ?: "" ) )>class="text-danger"</bx:if>>
+                                                        <i class="bi bi-calendar"></i> due #dateFormat( t.getDueDate(), "yyyy-mm-dd" )#
+                                                    </span>
+                                                </bx:if>
+                                                <bx:if len( t.getAssigneeId() ?: "" )>
+                                                    <span>
+                                                        <bx:if t.getAssigneeType() eq "agent"><i class="bi bi-person-badge"></i><bx:else><i class="bi bi-person"></i></bx:if>
+                                                        #encodeForHTML( local.assigneeLabel[ t.getAssigneeType() & ":" & t.getAssigneeId() ] ?: ( t.getAssigneeType() & " " & left( t.getAssigneeId(), 8 ) ) )#
+                                                    </span>
+                                                </bx:if>
+                                                <bx:if isNumeric( t.getEstimatedHours() ?: "" )>
+                                                    <span><i class="bi bi-stopwatch"></i> #t.getEstimatedHours()#h est</span>
+                                                </bx:if>
+                                            </div>
+                                        </li>
+                                    </bx:loop>
+                                </ul>
+                            </div>
+                        </div>
+                    </bx:if>
+                </bx:loop>
+
+                <!--- Tasks without an assigned status. Most projects do
+                      not produce these once statuses are seeded, but
+                      the report should still list them for visibility. --->
+                <bx:set local.noStatusCol      = local.columns[ "" ] ?: { tasks : [] } >
+                <bx:set local.noStatusTasks    = local.noStatusCol.tasks ?: [] >
+                <bx:if arrayLen( local.noStatusTasks )>
+                    <div class="card mb-3">
+                        <div class="card-header d-flex justify-content-between align-items-center py-2">
+                            <h2 class="h6 mb-0">
+                                <span class="badge text-bg-light border">No status</span>
+                                <span class="text-body-secondary ms-2 small">#arrayLen( local.noStatusTasks )# task<bx:if arrayLen( local.noStatusTasks ) neq 1>s</bx:if></span>
+                            </h2>
+                        </div>
+                        <div class="card-body p-0">
+                            <ul class="list-unstyled mb-0">
+                                <bx:loop array="#local.noStatusTasks#" item="t">
+                                    <bx:set local.tid = t.getId() >
+                                    <li class="border-top px-3 py-2">
+                                        <a href="/agent/pm/tasks/#encodeForURL( local.tid )#" class="text-decoration-none"><strong>#encodeForHTML( t.getTitle() )#</strong></a>
+                                        <bx:set local.tlabels = local.labelsByTask[ local.tid ] ?: [] >
+                                        <bx:if arrayLen( local.tlabels )>
+                                            <div class="mt-1">
+                                                <bx:loop array="#local.tlabels#" item="lbl">
+                                                    <span class="badge rounded-pill me-1" style="font-size: .7rem; <bx:if len( lbl.color )>background-color: #encodeForHTMLAttribute( lbl.color )#;<bx:else>background-color: var(--bs-secondary);</bx:if>">#encodeForHTML( lbl.name )#</span>
+                                                </bx:loop>
+                                            </div>
+                                        </bx:if>
+                                        <div class="small text-body-secondary mt-1 d-flex gap-3 flex-wrap">
+                                            <bx:if len( toString( t.getDueDate() ?: "" ) )><span><i class="bi bi-calendar"></i> due #dateFormat( t.getDueDate(), "yyyy-mm-dd" )#</span></bx:if>
+                                            <bx:if len( t.getAssigneeId() ?: "" )>
+                                                <span>
+                                                    <bx:if t.getAssigneeType() eq "agent"><i class="bi bi-person-badge"></i><bx:else><i class="bi bi-person"></i></bx:if>
+                                                    #encodeForHTML( local.assigneeLabel[ t.getAssigneeType() & ":" & t.getAssigneeId() ] ?: ( t.getAssigneeType() & " " & left( t.getAssigneeId(), 8 ) ) )#
+                                                </span>
+                                            </bx:if>
+                                        </div>
+                                    </li>
+                                </bx:loop>
+                            </ul>
+                        </div>
+                    </div>
+                </bx:if>
+            </div>
+
+        </div>
+
+    </div>
+</bx:if>
+</bx:output>

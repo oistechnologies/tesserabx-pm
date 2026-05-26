@@ -1,0 +1,151 @@
+/**
+ * Admin landing handler for /agent/admin/pm (Phase 13a polish).
+ *
+ * Replaces the Phase 0 placeholder Main.bx that bypassed the host
+ * layout. This one mounts inside the Agent layout, renders a real
+ * admin dashboard with PM headline stats, and links into every PM
+ * admin surface (Templates, Embedding Backfill, Default-template
+ * picker per organization).
+ *
+ * Stats come from cheap aggregate queries on the PM tables; the
+ * embedding-needing count drives the visibility of the Backfill
+ * card so an operator sees the call-to-action only when there's
+ * work to do.
+ *
+ * The Default-template picker is a tenant-aware section: the
+ * operator selects an organization, the page reloads showing the
+ * org's current `pm.default-template-id` setting and a select
+ * populated by TemplateService.listTemplates( organizationId ).
+ * Saving routes through SettingsRegistry@core (same code path the
+ * host's generic add-on settings page uses) so the value lands in
+ * the addon_settings table identically.
+ *
+ * Permissioning: the route claim that lands here is gated on
+ * `pm.admin` in the host's nav/admin-page registries (the host
+ * filters adminPages by permission before rendering the admin
+ * dashboard). The handler itself requires a logged-in agent via
+ * the agent firewall regex.
+ */
+class {
+
+    property name="templateService"  inject="TemplateService@tesserabx-pm";
+    property name="taskConsumer"     inject="TaskEmbeddingConsumer@tesserabx-pm";
+    property name="aiCapability"     inject="AiCapability@ai";
+    property name="addonRegistry"    inject="AddonRegistryService@core";
+    property name="settingsRegistry" inject="SettingsRegistry@core";
+    property name="contactsService"  inject="ContactsService@contacts";
+    property name="messagebox"       inject="messagebox@cbmessagebox";
+    property name="auth"             inject="AuthenticationService@cbauth";
+
+    variables.ADDON_ID            = "tesserabx-pm";
+    variables.DEFAULT_TEMPLATE_KEY = "pm.default-template-id";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Project Management — Admin";
+
+        prc.stats = {
+            projects         : countSingle( "SELECT COUNT(*) AS c FROM pm_projects WHERE deleted_at IS NULL" ),
+            projectsArchived : countSingle( "SELECT COUNT(*) AS c FROM pm_projects WHERE deleted_at IS NULL AND lifecycle_status = 'archived'" ),
+            tasksOpen        : countSingle( "SELECT COUNT(*) AS c FROM pm_tasks WHERE deleted_at IS NULL AND completed_at IS NULL" ),
+            tasksCompleted   : countSingle( "SELECT COUNT(*) AS c FROM pm_tasks WHERE deleted_at IS NULL AND completed_at IS NOT NULL" ),
+            templates        : arrayLen( templateService.listTemplates() ),
+            embedBacklog     : arrayLen( taskConsumer.listEntitiesNeedingIndex( 1000 ) )
+        };
+        prc.aiEnabled = safeAiEnabled();
+        prc.addonRow  = safeAddonRow();
+
+        // Default-template picker: tenant-scoped. Without an org
+        // selection we show only the picker; with an org we populate
+        // the select + the current setting value.
+        param rc.organizationId       = "";
+        prc.organizations             = safeOrgs();
+        prc.selectedOrgId             = rc.organizationId;
+        prc.defaultTemplateOptions    = [];
+        prc.defaultTemplateCurrent    = "";
+        if ( len( rc.organizationId ) ) {
+            prc.defaultTemplateOptions = templateService.listTemplates( rc.organizationId );
+            var v = settingsRegistry.resolve( variables.ADDON_ID, variables.DEFAULT_TEMPLATE_KEY, rc.organizationId );
+            prc.defaultTemplateCurrent = isNull( v ) ? "" : v;
+        }
+
+        event.setView( view = "admin/index", module = "tesserabx-pm" );
+    }
+
+    /**
+     * POST handler for the default-template picker. Either saves a
+     * per-tenant override (blank value -> clear) or messageboxes an
+     * error. Relocates back to the admin landing scoped to the same
+     * org so the operator sees the change persisted.
+     */
+    function saveDefaultTemplate( event, rc, prc ){
+        param rc.organizationId    = "";
+        param rc.defaultTemplateId = "";
+        if ( !len( rc.organizationId ) ) {
+            messagebox.error( "Pick an organization before saving the default template." );
+            relocate( uri = "/agent/admin/pm" );
+            return;
+        }
+        try {
+            if ( len( trim( rc.defaultTemplateId ) ) ) {
+                settingsRegistry.set(
+                    addonId        : variables.ADDON_ID,
+                    key            : variables.DEFAULT_TEMPLATE_KEY,
+                    value          : trim( rc.defaultTemplateId ),
+                    organizationId : rc.organizationId,
+                    actorAgentId   : currentAgentId()
+                );
+                messagebox.info( "Default project template saved for this organization." );
+            } else {
+                settingsRegistry.clear(
+                    addonId        : variables.ADDON_ID,
+                    key            : variables.DEFAULT_TEMPLATE_KEY,
+                    organizationId : rc.organizationId
+                );
+                messagebox.info( "Default project template override cleared for this organization." );
+            }
+        } catch ( any e ) {
+            messagebox.error( "Could not save: " & e.message );
+        }
+        relocate( uri = "/agent/admin/pm?organizationId=" & rc.organizationId );
+    }
+
+    // ---------- internals ----------
+
+    private numeric function countSingle( required string sql ){
+        try {
+            var r = queryExecute( arguments.sql );
+            return int( r.c[ 1 ] ?: 0 );
+        } catch ( any e ) {
+            return 0;
+        }
+    }
+
+    private boolean function safeAiEnabled(){
+        try { return !!aiCapability.isEnabled(); }
+        catch ( any e ) { return false; }
+    }
+
+    private any function safeAddonRow(){
+        try { return addonRegistry.findById( variables.ADDON_ID ); }
+        catch ( any e ) { return javaCast( "null", "" ); }
+    }
+
+    private array function safeOrgs(){
+        try { return contactsService.listOrganizations(); }
+        catch ( any e ) { return []; }
+    }
+
+    private string function currentAgentId(){
+        try {
+            var u = auth.getUser();
+            return isNull( u ) ? "" : u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+}

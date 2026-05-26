@@ -80,50 +80,6 @@
 				)#
 			</div>
 
-			<div class="mt-3">
-				#wire(
-					name   = "CustomFieldsForm@tesserabx-pm",
-					params = {
-						valuableType   : "task",
-						valuableId     : local.t.getId(),
-						projectId      : local.project.getId(),
-						organizationId : local.t.getOrganizationId()
-					}
-				)#
-			</div>
-
-			<div class="mt-3">
-				#wire(
-					name   = "TaskTicketLink@tesserabx-pm",
-					params = {
-						taskId    : local.t.getId(),
-						projectId : local.project.getId()
-					}
-				)#
-			</div>
-
-			<div class="mt-3">
-				#wire(
-					name   = "TimeLogger@tesserabx-pm",
-					params = {
-						loggableType   : "task",
-						loggableId     : local.t.getId(),
-						organizationId : local.t.getOrganizationId(),
-						projectId      : local.project.getId()
-					}
-				)#
-			</div>
-
-			<div class="mt-3">
-				#wire(
-					name   = "TaskEventFeed@tesserabx-pm",
-					params = {
-						taskId         : local.t.getId(),
-						organizationId : local.t.getOrganizationId()
-					}
-				)#
-			</div>
-
 			<div class="card mt-3">
 				<div class="card-body">
 					<div class="d-flex justify-content-between align-items-center mb-2">
@@ -168,6 +124,30 @@
 					</bx:if>
 				</div>
 			</div>
+
+			<div class="mt-3">
+				#wire(
+					name   = "CustomFieldsForm@tesserabx-pm",
+					params = {
+						valuableType   : "task",
+						valuableId     : local.t.getId(),
+						projectId      : local.project.getId(),
+						organizationId : local.t.getOrganizationId()
+					}
+				)#
+			</div>
+
+			<div class="mt-3">
+				#wire(
+					name   = "TimeLogger@tesserabx-pm",
+					params = {
+						loggableType   : "task",
+						loggableId     : local.t.getId(),
+						organizationId : local.t.getOrganizationId(),
+						projectId      : local.project.getId()
+					}
+				)#
+			</div>
 		</div>
 
 		<div class="col-12 col-lg-4">
@@ -197,36 +177,69 @@
 				)#
 			</div>
 
+			<div class="mt-3">
+				#wire(
+					name   = "TaskTicketLink@tesserabx-pm",
+					params = {
+						taskId    : local.t.getId(),
+						projectId : local.project.getId()
+					}
+				)#
+			</div>
+
+			<bx:set local.detailsId = "pm-task-details-" & encodeForHTMLAttribute( local.t.getId() ) >
 			<div class="card mt-3">
-				<div class="card-body">
-					<h2 class="h6 mb-3">Details</h2>
-					<dl class="row mb-0 small">
-						<dt class="col-5">Assignee</dt>
-						<dd class="col-7">
-							<bx:if len( local.t.getAssigneeId() ?: "" )>
-								<span class="badge text-bg-secondary">#encodeForHTML( local.t.getAssigneeType() )#</span>
-								<code>#encodeForHTML( left( local.t.getAssigneeId(), 8 ) )#…</code>
-							<bx:else>
-								<span class="text-body-secondary fst-italic">unassigned</span>
-							</bx:if>
-						</dd>
-
-						<dt class="col-5">Due</dt>
-						<dd class="col-7">#toString( local.t.getDueDate() ?: "" )#</dd>
-
-						<dt class="col-5">Estimated</dt>
-						<dd class="col-7"><bx:if isNumeric( local.t.getEstimatedHours() ?: "" )>#local.t.getEstimatedHours()#h<bx:else>—</bx:if></dd>
-
-						<dt class="col-5">Completed</dt>
-						<dd class="col-7">#toString( local.t.getCompletedAt() ?: "" )#</dd>
-
-						<dt class="col-5">Created</dt>
-						<dd class="col-7">#toString( local.t.getCreatedAt() ?: "" )#</dd>
-
-						<dt class="col-5">Updated</dt>
-						<dd class="col-7">#toString( local.t.getUpdatedAt() ?: "" )#</dd>
-					</dl>
+				<div class="card-header py-2">
+					<button class="btn btn-link p-0 d-flex justify-content-between align-items-center w-100 text-decoration-none collapsed"
+							type="button"
+							data-bs-toggle="collapse"
+							data-bs-target="#char(35)##local.detailsId#"
+							aria-expanded="false"
+							aria-controls="#local.detailsId#">
+						<h2 class="h6 mb-0 text-body"><i class="bi bi-info-circle"></i> Details</h2>
+						<i class="bi bi-chevron-down"></i>
+					</button>
 				</div>
+				<div class="collapse" id="#local.detailsId#">
+					<div class="card-body">
+						<dl class="row mb-0 small">
+							<dt class="col-5">Assignee</dt>
+							<dd class="col-7">
+								<bx:if len( local.t.getAssigneeId() ?: "" )>
+									<span class="badge text-bg-secondary">#encodeForHTML( local.t.getAssigneeType() )#</span>
+									<code>#encodeForHTML( left( local.t.getAssigneeId(), 8 ) )#…</code>
+								<bx:else>
+									<span class="text-body-secondary fst-italic">unassigned</span>
+								</bx:if>
+							</dd>
+
+							<dt class="col-5">Due</dt>
+							<dd class="col-7">#toString( local.t.getDueDate() ?: "" )#</dd>
+
+							<dt class="col-5">Estimated</dt>
+							<dd class="col-7"><bx:if isNumeric( local.t.getEstimatedHours() ?: "" )>#local.t.getEstimatedHours()#h<bx:else>—</bx:if></dd>
+
+							<dt class="col-5">Completed</dt>
+							<dd class="col-7">#toString( local.t.getCompletedAt() ?: "" )#</dd>
+
+							<dt class="col-5">Created</dt>
+							<dd class="col-7">#toString( local.t.getCreatedAt() ?: "" )#</dd>
+
+							<dt class="col-5">Updated</dt>
+							<dd class="col-7">#toString( local.t.getUpdatedAt() ?: "" )#</dd>
+						</dl>
+					</div>
+				</div>
+			</div>
+
+			<div class="mt-3">
+				#wire(
+					name   = "TaskEventFeed@tesserabx-pm",
+					params = {
+						taskId         : local.t.getId(),
+						organizationId : local.t.getOrganizationId()
+					}
+				)#
 			</div>
 		</div>
 	</div>

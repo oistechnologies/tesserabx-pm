@@ -23,7 +23,7 @@
             </div>
             <div class="col-6 col-md-3">
                 <label class="form-label small mb-0" for="lm-color">Color</label>
-                <input id="lm-color" type="text" class="form-control form-control-sm" wire:model="newColor" maxlength="32" placeholder="e.g. ##0d6efd or red">
+                <input id="lm-color" type="color" class="form-control form-control-color form-control-sm w-100" wire:model="newColor" title="Pick a color">
             </div>
             <div class="col-6 col-md-3">
                 <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-lg"></i> Add</button>
@@ -39,7 +39,7 @@
                         <bx:if data.editingId eq l.getId()>
                             <div class="d-flex gap-2 flex-grow-1">
                                 <input type="text" class="form-control form-control-sm" wire:model="editName" style="max-width: 18rem;">
-                                <input type="text" class="form-control form-control-sm" wire:model="editColor" placeholder="color" style="max-width: 10rem;">
+                                <input type="color" class="form-control form-control-color form-control-sm" wire:model="editColor" title="Edit color" style="max-width: 4rem;">
                             </div>
                             <div class="d-flex gap-1">
                                 <button class="btn btn-sm btn-primary" wire:click="saveEdit()"><i class="bi bi-check-lg"></i></button>

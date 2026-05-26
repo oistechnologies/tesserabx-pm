@@ -168,6 +168,26 @@ echo( "wrote=" & getFileInfo( "/tmp/probe.txt" ).size & chr( 10 ) );
 
 If that reproduces with `wrote < len`, the bug is in BoxLang core and the upstream PR target is the BoxLang repo, not CBWire. If `wrote == len`, the bug is in CBWire's call site.
 
+## 2026-05-25 update: confirmed cause for at least one variant
+
+Mike isolated a likely cause while building the Phase 13a collapsible Activity card in `wires/projectEventFeed.bxm`. The template included a Bootstrap collapse toggle whose `data-bs-target` attribute needed a CSS selector starting with `#`:
+
+```bxm
+<!-- BROKE the parser; produced "Unclosed output tag on line 1" -->
+<button data-bs-target="##encodeForHTMLAttribute( local.bodyId )#" ...>
+```
+
+Replacing the `##` literal-hash escape with the BoxLang BIF `#char(35)#` (which evaluates to ASCII 35 = `#`) parsed cleanly:
+
+```bxm
+<!-- WORKS -->
+<button data-bs-target="#char(35)##encodeForHTMLAttribute( local.bodyId )#" ...>
+```
+
+Hypothesis: BoxLang's `<bx:output>` parser cannot reliably decide whether `##expression(...)#` means "escaped literal `#` followed by a new `#expression#`" or some single tangled expression. The failure surfaces sometimes as the truncated tmp file documented above, and sometimes as the "Unclosed output tag on line 1" parse error pointing at the file's opening `<bx:output>`. `#char(35)#` is one unambiguous expression with no escape semantics involved, so the parser does not get confused.
+
+This may not be the same bug as the Phase 12a Related Tasks truncation (which had no `##`-adjacent-expression pattern in the source), but it produces the same misleading error and falls under the same "wire tmp file is shorter than the source" symptom class. Both fix paths (flatten the template, swap `##` for `#char(35)#`) are zero-cost workarounds while the underlying parser is investigated.
+
 ## Patterns that may correlate (untested hypotheses)
 
 Things worth varying in a binary-search reproduction:

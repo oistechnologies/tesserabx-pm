@@ -97,10 +97,79 @@
                                         </div>
                                     </div>
                                     <div class="d-flex gap-1">
+                                        <button class="btn btn-link btn-sm p-0" wire:click="togglePreview('#encodeForHTMLAttribute( t.getId() )#')" title="<bx:if data.previewId eq t.getId()>Hide preview<bx:else>Preview structure</bx:if>">
+                                            <bx:if data.previewId eq t.getId()><i class="bi bi-eye-slash"></i><bx:else><i class="bi bi-eye"></i></bx:if>
+                                        </button>
+                                        <button class="btn btn-link btn-sm p-0" wire:click="duplicate('#encodeForHTMLAttribute( t.getId() )#')" title="Duplicate"><i class="bi bi-files"></i></button>
                                         <button class="btn btn-link btn-sm p-0" wire:click="startEdit('#encodeForHTMLAttribute( t.getId() )#')" title="Edit"><i class="bi bi-pencil"></i></button>
                                         <button class="btn btn-link btn-sm p-0 text-danger" wire:click="remove('#encodeForHTMLAttribute( t.getId() )#')" wire:confirm="Delete this template? Projects already created from it are unaffected." title="Delete"><i class="bi bi-trash"></i></button>
                                     </div>
                                 </div>
+
+                                <bx:if data.previewId eq t.getId()>
+                                    <bx:set local.struct = structure( t ) >
+                                    <div class="mt-3 p-3 bg-body-tertiary rounded border">
+                                        <h3 class="h6 mb-2 text-body-secondary"><i class="bi bi-stack"></i> Snapshot structure</h3>
+                                        <div class="row g-3">
+                                            <div class="col-12 col-md-6">
+                                                <div class="small text-body-secondary mb-1">Statuses</div>
+                                                <bx:if !arrayLen( local.struct.statuses )>
+                                                    <div class="small fst-italic text-body-secondary">None.</div>
+                                                <bx:else>
+                                                    <bx:loop array="#local.struct.statuses#" item="s">
+                                                        <span class="badge me-1 mb-1"
+                                                            <bx:if len( s.color ?: "" )> style="background-color: #encodeForHTMLAttribute( s.color )#;"<bx:else> style="background-color: var(--bs-secondary);"</bx:if>>
+                                                            #encodeForHTML( s.name ?: "" )#
+                                                        </span>
+                                                    </bx:loop>
+                                                </bx:if>
+                                            </div>
+                                            <div class="col-12 col-md-6">
+                                                <div class="small text-body-secondary mb-1">Labels</div>
+                                                <bx:if !arrayLen( local.struct.labels )>
+                                                    <div class="small fst-italic text-body-secondary">None.</div>
+                                                <bx:else>
+                                                    <bx:loop array="#local.struct.labels#" item="l">
+                                                        <span class="badge rounded-pill me-1 mb-1"
+                                                            <bx:if len( l.color ?: "" )> style="background-color: #encodeForHTMLAttribute( l.color )#;"<bx:else> style="background-color: var(--bs-secondary);"</bx:if>>
+                                                            #encodeForHTML( l.name ?: "" )#
+                                                        </span>
+                                                    </bx:loop>
+                                                </bx:if>
+                                            </div>
+                                            <div class="col-12 col-md-6">
+                                                <div class="small text-body-secondary mb-1">Custom fields</div>
+                                                <bx:if !arrayLen( local.struct.custom_fields )>
+                                                    <div class="small fst-italic text-body-secondary">None.</div>
+                                                <bx:else>
+                                                    <ul class="list-unstyled mb-0 small">
+                                                        <bx:loop array="#local.struct.custom_fields#" item="f">
+                                                            <li><span class="badge text-bg-light border me-1">#encodeForHTML( f.field_type ?: "string" )#</span>#encodeForHTML( f.name ?: "" )#</li>
+                                                        </bx:loop>
+                                                    </ul>
+                                                </bx:if>
+                                            </div>
+                                            <div class="col-12 col-md-6">
+                                                <div class="small text-body-secondary mb-1">Tasks &amp; subtasks</div>
+                                                <bx:if !arrayLen( local.struct.tasks )>
+                                                    <div class="small fst-italic text-body-secondary">None.</div>
+                                                <bx:else>
+                                                    <ul class="list-unstyled mb-0 small">
+                                                        <bx:loop array="#local.struct.tasks#" item="tk">
+                                                            <li class="mb-1">
+                                                                <span class="badge text-bg-light border me-1">#encodeForHTML( tk.priority ?: "medium" )#</span>
+                                                                #encodeForHTML( tk.title ?: "" )#
+                                                                <bx:if arrayLen( tk.subtasks ?: [] )>
+                                                                    <span class="text-body-secondary"> (#arrayLen( tk.subtasks )# subtasks)</span>
+                                                                </bx:if>
+                                                            </li>
+                                                        </bx:loop>
+                                                    </ul>
+                                                </bx:if>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </bx:if>
                             </bx:if>
                         </li>
                     </bx:loop>

@@ -33,6 +33,11 @@ class {
         route( "projects/:id/restore" ).withVerbs( "POST" ).to( "Projects.restore" );
         route( "projects/:id/delete"  ).withVerbs( "POST" ).to( "Projects.remove" );
         route( "projects/:id/edit"    ).to( "Projects.edit" );
+        // Phase 13a polish: read-only overview report. `/overview`
+        // renders inside the host Agent layout; `/overview/print`
+        // uses PM's minimal Print layout for clean printing.
+        route( "projects/:id/overview/print" ).to( "Projects.overviewPrint" );
+        route( "projects/:id/overview"       ).to( "Projects.overview" );
 
         // Tasks nested under their project for create (list + form
         // know the parent project context); show / edit / mutation
@@ -50,6 +55,8 @@ class {
         route( "projects/:projectId/tasks" ).to( "Tasks.index" );
         route( "projects/:projectId/labels"        ).to( "Labels.index" );
         route( "projects/:projectId/custom-fields" ).to( "CustomFields.index" );
+        // Phase 13a polish: per-project status CRUD.
+        route( "projects/:projectId/statuses"      ).to( "ProjectStatuses.index" );
 
         route( "projects/:id" ).withHandler( "Projects" ).toAction( {
             "GET"  : "show",

@@ -23,7 +23,8 @@
  */
 class {
 
-    property name="wirebox" inject="wirebox";
+    property name="wirebox"    inject="wirebox";
+    property name="messagebox" inject="messagebox@cbmessagebox";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
@@ -46,6 +47,39 @@ class {
         var scheduler = wirebox.getInstance( "EmbeddingScheduler@ai" );
         var report    = scheduler.runOnce( perConsumerLimit : limit );
         event.renderData( type : "json", data : report );
+    }
+
+    /**
+     * Admin-UI variant of `run`. Triggers the same scheduler sweep
+     * but messageboxes the per-consumer summary and relocates back
+     * to the PM admin landing so an operator who clicked the "Run
+     * backfill now" button gets a human-friendly result instead of
+     * raw JSON. Phase 13a polish.
+     */
+    function runUi( event, rc, prc ){
+        var limit     = val( rc.limit ?: 200 );
+        if ( limit < 1 ) limit = 200;
+        try {
+            var scheduler = wirebox.getInstance( "EmbeddingScheduler@ai" );
+            var report    = scheduler.runOnce( perConsumerLimit : limit );
+
+            var pmLine = "";
+            for ( var c in ( report.consumers ?: [] ) ) {
+                if ( ( c.id ?: "" ) == "tesserabx-pm.task" ) {
+                    pmLine = " PM tasks indexed: " & val( c.indexed ?: 0 ) & " (" & val( c.errored ?: 0 ) & " errors).";
+                    break;
+                }
+            }
+            messagebox.info(
+                "Embedding sweep complete. "
+                & "Total indexed: " & val( report.totalIndexed ?: 0 ) & "."
+                & pmLine
+                & " Duration: " & val( report.durationMs ?: 0 ) & "ms."
+            );
+        } catch ( any e ) {
+            messagebox.error( "Backfill failed: " & e.message );
+        }
+        relocate( uri = "/agent/admin/pm" );
     }
 
 }

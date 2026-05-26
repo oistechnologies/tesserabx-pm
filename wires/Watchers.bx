@@ -21,6 +21,7 @@
 class extends="cbwire.models.Component" {
 
     property name="watcherService" inject="WatcherService@tesserabx-pm";
+    property name="accountLookup"  inject="AccountLookupService@tesserabx-pm";
     property name="auth"           inject="AuthenticationService@cbauth";
 
     data = {
@@ -42,6 +43,30 @@ class extends="cbwire.models.Component" {
     function watchers(){
         if ( !len( data.watchableType ) || !len( data.watchableId ) ) return [];
         return watcherService.listForWatchable( data.watchableType, data.watchableId );
+    }
+
+    /**
+     * Picker options for the "Add a watcher" form, scoped to the
+     * current account-type selection. Agents are not org-scoped;
+     * contacts are scoped to the watchable's organization so an
+     * agent does not surface contacts outside the tenant.
+     */
+    function accountOptions(){
+        if ( ( data.newWatcherType ?: "" ) == "contact" ) {
+            return accountLookup.listContactsForOrganization( data.organizationId );
+        }
+        return accountLookup.listAgents();
+    }
+
+    /**
+     * Resolve a watcher row's display label for the list rendering.
+     * The wire's row loop calls this for each watcher so the UI
+     * reads as "Jane Smith (jane@example.com)" instead of
+     * "agent <truncated-uuid>". Cached per-call would be ideal once
+     * the list grows; for now the lookups are direct.
+     */
+    function watcherLabel( required string watcherType, required string watcherId ){
+        return accountLookup.accountLabel( arguments.watcherType, arguments.watcherId );
     }
 
     function viewer(){
@@ -75,16 +100,15 @@ class extends="cbwire.models.Component" {
     }
 
     /**
-     * Add a watcher of any type by id. UUID-paste pattern matches
-     * the rest of PM's agent/contact picker surface (the picker
-     * dropdowns land alongside the host's account-search service
-     * exposing a public listing API).
+     * Add a watcher of the selected type and id. Phase 13a swapped
+     * the UUID-paste input for a select dropdown populated via
+     * AccountLookupService.accountOptions; the dispatch is unchanged.
      */
     function addWatcher(){
         var wType = trim( data.newWatcherType ?: "" );
         var wId   = trim( data.newWatcherId   ?: "" );
         if ( !len( wId ) ) {
-            notice( "Paste the agent or contact id to watch this.", "warning" );
+            notice( "Pick an account to watch this.", "warning" );
             return;
         }
         try {

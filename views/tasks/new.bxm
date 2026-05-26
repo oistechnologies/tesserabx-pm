@@ -66,20 +66,25 @@
 					<input type="number" step="0.25" min="0" class="form-control" id="estimatedHours" name="estimatedHours"
 						value="#encodeForHTMLAttribute( prc.formData.estimatedHours ?: "" )#">
 				</div>
-				<div class="col-6 col-md-3">
-					<label class="form-label" for="assigneeType">Assignee type</label>
-					<select class="form-select" id="assigneeType" name="assigneeType">
+				<div class="col-12 col-md-9">
+					<label class="form-label" for="assigneeChoice">Assignee</label>
+					<select class="form-select" id="assigneeChoice" name="assigneeChoice">
 						<option value="">(unassigned)</option>
-						<option value="agent"   <bx:if ( prc.formData.assigneeType ?: "" ) eq "agent">  selected</bx:if>>agent</option>
-						<option value="contact" <bx:if ( prc.formData.assigneeType ?: "" ) eq "contact">selected</bx:if>>contact</option>
+						<bx:if arrayLen( prc.assigneeAgents ?: [] )>
+							<optgroup label="Agents">
+								<bx:loop array="#prc.assigneeAgents#" item="a">
+									<option value="agent:#encodeForHTMLAttribute( a.id )#" <bx:if ( prc.formData.assigneeChoice ?: "" ) eq ( "agent:" & a.id )>selected</bx:if>>#encodeForHTML( a.label )#</option>
+								</bx:loop>
+							</optgroup>
+						</bx:if>
+						<bx:if arrayLen( prc.assigneeContacts ?: [] )>
+							<optgroup label="Contacts">
+								<bx:loop array="#prc.assigneeContacts#" item="c">
+									<option value="contact:#encodeForHTMLAttribute( c.id )#" <bx:if ( prc.formData.assigneeChoice ?: "" ) eq ( "contact:" & c.id )>selected</bx:if>>#encodeForHTML( c.label )#</option>
+								</bx:loop>
+							</optgroup>
+						</bx:if>
 					</select>
-				</div>
-				<div class="col-12 col-md-6">
-					<label class="form-label" for="assigneeId">Assignee id (uuid)</label>
-					<input type="text" class="form-control font-monospace" id="assigneeId" name="assigneeId"
-						placeholder="paste an agent or contact id"
-						value="#encodeForHTMLAttribute( prc.formData.assigneeId ?: "" )#">
-					<small class="form-text text-body-secondary">Phase 2c will switch this to a picker. For now paste a UUID; service rejects mismatched type/id pairs.</small>
 				</div>
 				<div class="col-12">
 					<div class="form-check">

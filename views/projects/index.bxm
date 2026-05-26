@@ -72,11 +72,12 @@
 							<th>Start</th>
 							<th>End</th>
 							<th class="text-end">Created</th>
+							<th class="text-end">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
 						<bx:if !arrayLen( prc.projects ?: [] )>
-							<tr><td colspan="7" class="text-center text-body-secondary py-4">No projects match your filters.</td></tr>
+							<tr><td colspan="8" class="text-center text-body-secondary py-4">No projects match your filters.</td></tr>
 						</bx:if>
 						<bx:loop array="#prc.projects#" item="p">
 							<tr>
@@ -85,7 +86,7 @@
 										#encodeForHTML( p.getName() )#
 									</a>
 									<bx:if len( p.getDescription() ?: "" )>
-										<div class="text-body-secondary small">#encodeForHTML( left( p.getDescription(), 120 ) )##len( p.getDescription() ) gt 120 ? "..." : ""#</div>
+										<div class="text-body-secondary small pm-clamp-2" title="#encodeForHTMLAttribute( p.getDescription() )#">#encodeForHTML( p.getDescription() )#</div>
 									</bx:if>
 								</td>
 								<td class="text-body-secondary small">
@@ -100,7 +101,15 @@
 										<span class="text-warning">unknown</span>
 									</bx:if>
 								</td>
-								<td><span class="badge text-bg-secondary">#encodeForHTML( p.getVisibilityScope() )#</span></td>
+								<td>
+									<bx:if p.getVisibilityScope() eq "all_org_members">
+										<span class="badge text-bg-secondary" title="All organization members">ORG</span>
+									<bx:elseif p.getVisibilityScope() eq "specific_members">
+										<span class="badge text-bg-secondary" title="Specific project members only">MEMBERS</span>
+									<bx:else>
+										<span class="badge text-bg-secondary" title="#encodeForHTMLAttribute( p.getVisibilityScope() )#">#encodeForHTML( uCase( left( p.getVisibilityScope(), 6 ) ) )#</span>
+									</bx:if>
+								</td>
 								<td>
 									<bx:if p.getLifecycleStatus() eq "active">
 										<span class="badge text-bg-success">active</span>
@@ -112,7 +121,17 @@
 								</td>
 								<td class="text-body-secondary small">#toString( p.getStartDate() ?: "" )#</td>
 								<td class="text-body-secondary small">#toString( p.getEndDate() ?: "" )#</td>
-								<td class="text-end text-body-secondary small">#toString( p.getCreatedAt() ?: "" )#</td>
+								<td class="text-end text-body-secondary small">
+									<bx:if isDate( p.getCreatedAt() ?: "" )>#dateFormat( p.getCreatedAt(), "yyyy-mm-dd" )#</bx:if>
+								</td>
+								<td class="text-end text-nowrap">
+									<a class="btn btn-sm btn-outline-primary" href="/agent/pm/projects/#encodeForURL( p.getId() )#/tasks" title="Open task board" aria-label="Open task board">
+										<i class="bi bi-kanban"></i>
+									</a>
+									<a class="btn btn-sm btn-outline-primary ms-1" href="/agent/pm/projects/#encodeForURL( p.getId() )#/overview" title="Open project overview" aria-label="Open project overview">
+										<i class="bi bi-file-earmark-bar-graph"></i>
+									</a>
+								</td>
 							</tr>
 						</bx:loop>
 					</tbody>

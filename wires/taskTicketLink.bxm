@@ -1,80 +1,89 @@
 <bx:output>
 <bx:script>
-    local.links = links();
+    local.links  = links();
+    local.bodyId = "ttl-body-" & _getID();
 </bx:script>
 
 <div class="card" data-pm-wire-id="#_getID()#">
-    <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <h2 class="h5 mb-0"><i class="bi bi-link-45deg"></i> Linked tickets <span class="badge text-bg-secondary">#arrayLen( local.links )#</span></h2>
-        </div>
+    <div class="card-header py-2">
+        <button class="btn btn-link p-0 d-flex justify-content-between align-items-center w-100 text-decoration-none collapsed"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#char(35)##local.bodyId#"
+                aria-expanded="false"
+                aria-controls="#encodeForHTMLAttribute( local.bodyId )#">
+            <h2 class="h6 mb-0 text-body"><i class="bi bi-link-45deg"></i> Linked tickets <span class="badge text-bg-secondary ms-1">#arrayLen( local.links )#</span></h2>
+            <i class="bi bi-chevron-down"></i>
+        </button>
+    </div>
+    <div class="collapse" id="#encodeForHTMLAttribute( local.bodyId )#">
+        <div class="card-body">
+            <bx:if len( notice )>
+                <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
+                    <span>#encodeForHTML( notice )#</span>
+                    <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
+                </div>
+            </bx:if>
 
-        <bx:if len( notice )>
-            <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center mb-3 py-2" role="alert">
-                <span>#encodeForHTML( notice )#</span>
-                <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" wire:click="$set('notice','')"></button>
-            </div>
-        </bx:if>
+            <form wire:submit.prevent="add" class="row g-2 align-items-end mb-3">
+                <div class="col-12">
+                    <label class="form-label small mb-0" for="ttl-ticket">Ticket id</label>
+                    <input id="ttl-ticket" type="text" class="form-control form-control-sm font-monospace" wire:model="newTicketId" placeholder="UUID of the ticket">
+                </div>
+                <div class="col-7">
+                    <label class="form-label small mb-0" for="ttl-type">Link type</label>
+                    <select id="ttl-type" class="form-select form-select-sm" wire:model="newLinkType">
+                        <option value="related">related</option>
+                        <option value="blocks">blocks</option>
+                        <option value="fixes">fixes</option>
+                    </select>
+                </div>
+                <div class="col-5">
+                    <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-link"></i> Link</button>
+                </div>
+            </form>
 
-        <form wire:submit.prevent="add" class="row g-2 align-items-end mb-3">
-            <div class="col-12 col-md-7">
-                <label class="form-label small mb-0" for="ttl-ticket">Ticket id</label>
-                <input id="ttl-ticket" type="text" class="form-control form-control-sm font-monospace" wire:model="newTicketId" placeholder="UUID of the ticket">
-            </div>
-            <div class="col-6 col-md-3">
-                <label class="form-label small mb-0" for="ttl-type">Link type</label>
-                <select id="ttl-type" class="form-select form-select-sm" wire:model="newLinkType">
-                    <option value="related">related</option>
-                    <option value="blocks">blocks</option>
-                    <option value="fixes">fixes</option>
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
-                <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-link"></i> Link</button>
-            </div>
-        </form>
-
-        <bx:if !arrayLen( local.links )>
-            <p class="text-body-secondary small fst-italic mb-0">No linked tickets yet.</p>
-        <bx:else>
-            <ul class="list-unstyled mb-0">
-                <bx:loop array="#local.links#" item="row">
-                    <li class="border-top pt-2 pb-2 d-flex justify-content-between align-items-start gap-2">
-                        <div class="flex-grow-1">
-                            <bx:if isNull( row.ticket )>
-                                <code class="text-body-secondary">#encodeForHTML( row.link.getTicketId() )#</code>
-                                <span class="badge text-bg-warning ms-2">missing ticket</span>
-                            <bx:else>
-                                <a href="/agent/tickets/#encodeForURL( row.ticket.getId() )#" class="text-decoration-none">
-                                    <strong>#encodeForHTML( row.ticket.getSubject() ?: "(no subject)" )#</strong>
-                                </a>
-                                <bx:if len( row.ticket.getStatus() ?: "" )>
-                                    <span class="badge text-bg-light border ms-2">#encodeForHTML( row.ticket.getStatus() )#</span>
-                                </bx:if>
-                                <code class="ms-1 text-body-secondary small">#encodeForHTML( left( row.ticket.getId(), 8 ) )#…</code>
-                            </bx:if>
-                            <div class="small text-body-secondary mt-1">
-                                <span class="me-2">
-                                    <select class="form-select form-select-sm d-inline-block w-auto"
-                                            style="font-size: 0.75rem;"
-                                            wire:change="changeType('#encodeForHTMLAttribute( row.link.getTicketId() )#', $event.target.value)">
-                                        <bx:loop array="#[ 'related', 'blocks', 'fixes' ]#" item="lt">
-                                            <option value="#encodeForHTMLAttribute( lt )#" <bx:if row.link.getLinkType() eq lt>selected</bx:if>>#encodeForHTML( lt )#</option>
-                                        </bx:loop>
-                                    </select>
-                                </span>
-                                <span>linked #dateTimeFormat( row.link.getLinkedAt(), "yyyy-mm-dd HH:nn" )#</span>
+            <bx:if !arrayLen( local.links )>
+                <p class="text-body-secondary small fst-italic mb-0">No linked tickets yet.</p>
+            <bx:else>
+                <ul class="list-unstyled mb-0">
+                    <bx:loop array="#local.links#" item="row">
+                        <li class="border-top pt-2 pb-2">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div class="flex-grow-1">
+                                    <bx:if isNull( row.ticket )>
+                                        <code class="text-body-secondary small">#encodeForHTML( row.link.getTicketId() )#</code>
+                                        <span class="badge text-bg-warning ms-2">missing ticket</span>
+                                    <bx:else>
+                                        <a href="/agent/tickets/#encodeForURL( row.ticket.getId() )#" class="text-decoration-none">
+                                            <strong class="small">#encodeForHTML( row.ticket.getSubject() ?: "(no subject)" )#</strong>
+                                        </a>
+                                        <bx:if len( row.ticket.getStatus() ?: "" )>
+                                            <span class="badge text-bg-light border ms-1">#encodeForHTML( row.ticket.getStatus() )#</span>
+                                        </bx:if>
+                                    </bx:if>
+                                </div>
+                                <button class="btn btn-link btn-sm text-danger p-0"
+                                        wire:click="unlink('#encodeForHTMLAttribute( row.link.getTicketId() )#')"
+                                        wire:confirm="Remove this link? The ticket and task themselves stay; only the link row is deleted.">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
                             </div>
-                        </div>
-                        <button class="btn btn-link btn-sm text-danger p-0"
-                                wire:click="unlink('#encodeForHTMLAttribute( row.link.getTicketId() )#')"
-                                wire:confirm="Remove this link? The ticket and task themselves stay; only the link row is deleted.">
-                            <i class="bi bi-x-lg"></i>
-                        </button>
-                    </li>
-                </bx:loop>
-            </ul>
-        </bx:if>
+                            <div class="small text-body-secondary mt-1">
+                                <select class="form-select form-select-sm d-inline-block w-auto"
+                                        style="font-size: 0.75rem;"
+                                        wire:change="changeType('#encodeForHTMLAttribute( row.link.getTicketId() )#', $event.target.value)">
+                                    <bx:loop array="#[ 'related', 'blocks', 'fixes' ]#" item="lt">
+                                        <option value="#encodeForHTMLAttribute( lt )#" <bx:if row.link.getLinkType() eq lt>selected</bx:if>>#encodeForHTML( lt )#</option>
+                                    </bx:loop>
+                                </select>
+                                <span class="ms-2">linked #dateTimeFormat( row.link.getLinkedAt(), "yyyy-mm-dd HH:nn" )#</span>
+                            </div>
+                        </li>
+                    </bx:loop>
+                </ul>
+            </bx:if>
+        </div>
     </div>
 </div>
 </bx:output>

@@ -1,0 +1,154 @@
+/**
+ * StatusManager: per-project status CRUD UI (Phase 13a polish).
+ *
+ * Mounted from views/projectStatuses/index.bxm at
+ * /agent/pm/projects/:projectId/statuses.
+ *
+ * Mirrors the LabelManager shape: an inline add row up top, then an
+ * ordered list of existing statuses with per-row edit + delete +
+ * move-up / move-down controls. The two boolean flags (is_default,
+ * is_completed) are exposed as switches; the service enforces the
+ * "exactly one default" invariant by demoting others on set.
+ *
+ * Color is an HTML5 picker just like Labels.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="statusService" inject="ProjectStatusService@tesserabx-pm";
+
+    data = {
+        "projectId"      : "",
+        "organizationId" : "",
+        "newName"        : "",
+        "newColor"       : "##6c757d",
+        "newIsDefault"   : false,
+        "newIsCompleted" : false,
+        "editingId"        : "",
+        "editName"         : "",
+        "editColor"        : "##6c757d",
+        "editIsDefault"    : false,
+        "editIsCompleted"  : false,
+        "notice"         : "",
+        "noticeKind"     : "info"
+    };
+
+    function onMount( required struct params = {} ){
+        data.projectId      = arguments.params.projectId      ?: "";
+        data.organizationId = arguments.params.organizationId ?: "";
+    }
+
+    function statuses(){
+        if ( !len( data.projectId ) ) return [];
+        return statusService.listForProject( data.projectId );
+    }
+
+    function add(){
+        var name = trim( data.newName ?: "" );
+        if ( !len( name ) ) {
+            notice( "Enter a status name.", "warning" );
+            return;
+        }
+        try {
+            statusService.createStatus( {
+                projectId      : data.projectId,
+                organizationId : data.organizationId,
+                name           : name,
+                color          : trim( data.newColor ?: "" ),
+                isDefault      : !!data.newIsDefault,
+                isCompleted    : !!data.newIsCompleted
+            } );
+            data.newName        = "";
+            data.newColor       = "##6c757d";
+            data.newIsDefault   = false;
+            data.newIsCompleted = false;
+            notice( "Status added.", "success" );
+        } catch ( any e ) {
+            notice( "Could not add status: " & e.message, "danger" );
+        }
+    }
+
+    function startEdit( id ){
+        var s = statusService.getStatus( arguments.id ?: "" );
+        if ( isNull( s ) ) return;
+        data.editingId       = s.getId();
+        data.editName        = s.getName();
+        var existing         = s.getColor() ?: "";
+        data.editColor       = isHexColor( existing ) ? existing : "##6c757d";
+        data.editIsDefault   = !!s.getIsDefault();
+        data.editIsCompleted = !!s.getIsCompleted();
+    }
+
+    function cancelEdit(){
+        data.editingId       = "";
+        data.editName        = "";
+        data.editColor       = "##6c757d";
+        data.editIsDefault   = false;
+        data.editIsCompleted = false;
+    }
+
+    function saveEdit(){
+        if ( !len( data.editingId ?: "" ) ) return;
+        try {
+            statusService.updateStatus( data.editingId, {
+                name        : trim( data.editName ?: "" ),
+                color       : trim( data.editColor ?: "" ),
+                isDefault   : !!data.editIsDefault,
+                isCompleted : !!data.editIsCompleted
+            } );
+            cancelEdit();
+            notice( "Status updated.", "success" );
+        } catch ( any e ) {
+            notice( "Could not update status: " & e.message, "danger" );
+        }
+    }
+
+    function remove( id ){
+        try {
+            statusService.removeStatus( arguments.id ?: "" );
+            notice( "Status removed.", "info" );
+        } catch ( any e ) {
+            notice( "Could not remove status: " & e.message, "danger" );
+        }
+    }
+
+    function moveUp( id ){
+        shift( arguments.id ?: "", -1 );
+    }
+
+    function moveDown( id ){
+        shift( arguments.id ?: "", 1 );
+    }
+
+    private void function shift( required string id, required numeric direction ){
+        var all = statuses();
+        if ( !arrayLen( all ) ) return;
+        var ids = [];
+        var idx = 0;
+        for ( var i = 1; i <= arrayLen( all ); i++ ) {
+            ids.append( all[ i ].getId() );
+            if ( all[ i ].getId() == arguments.id ) idx = i;
+        }
+        if ( idx == 0 ) return;
+        var target = idx + arguments.direction;
+        if ( target < 1 || target > arrayLen( ids ) ) return;
+        var tmp = ids[ idx ];
+        ids[ idx ]    = ids[ target ];
+        ids[ target ] = tmp;
+        try {
+            statusService.reorderStatuses( data.projectId, ids );
+            notice( "Order updated.", "success" );
+        } catch ( any e ) {
+            notice( "Could not reorder: " & e.message, "danger" );
+        }
+    }
+
+    private boolean function isHexColor( required string raw ){
+        return reFindNoCase( "^##[0-9a-f]{6}$", arguments.raw ) > 0;
+    }
+
+    private void function notice( required string msg, string kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+}

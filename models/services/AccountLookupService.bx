@@ -1,0 +1,142 @@
+/**
+ * AccountLookupService: directory reads PM needs to populate
+ * assignee / watcher dropdowns (Phase 13a polish).
+ *
+ * The host's agents + contacts tables are shared infrastructure; PM
+ * reads them directly via raw SQL (the same pattern SuggestionService
+ * uses for its label resolver). The host has not yet shipped a
+ * dedicated AccountSearchService contract; when it does, this class
+ * is the call site to swap.
+ *
+ * Methods:
+ *   - listAgents( limit )                     -> array<{ id, label, email, type:"agent" }>
+ *   - listContactsForOrganization( orgId, l ) -> array<{ id, label, email, type:"contact" }>
+ *   - listForOrganization( orgId, limit )     -> combined list (agents + contacts in org)
+ *   - accountLabel( type, id )                -> single resolved label
+ *
+ * Labels prefer the "First Last" form when both names are present,
+ * fall back to email, then to "type:short-id" as a last resort. The
+ * shape is the same shape SuggestionService.resolveAccountLabel
+ * returns so the two services can share label rendering downstream.
+ *
+ * Tenant invariant: contacts list is always organization-scoped; the
+ * caller is responsible for passing the correct organization_id
+ * (typically prc.project.getOrganizationId() on PM form views).
+ */
+class singleton=true {
+
+    variables.DEFAULT_LIMIT = 200;
+
+    /**
+     * List active agents, ordered by display label asc.
+     * Active = not soft-deleted. Excludes the system account.
+     */
+    public array function listAgents( numeric limit = variables.DEFAULT_LIMIT ){
+        var rows = queryExecute(
+            "SELECT id, first_name, last_name, email
+             FROM   agents
+             WHERE  is_active = TRUE
+             ORDER BY COALESCE( NULLIF( TRIM( first_name || ' ' || last_name ), '' ), email )
+             LIMIT " & int( arguments.limit )
+        );
+        return toAccountList( rows, "agent" );
+    }
+
+    /**
+     * List contacts in a given organization, ordered by display label asc.
+     * Returns empty when the org id is blank or no rows match.
+     */
+    public array function listContactsForOrganization(
+        required string organizationId,
+        numeric limit = variables.DEFAULT_LIMIT
+    ){
+        if ( !len( trim( arguments.organizationId ) ) ) return [];
+        var rows = queryExecute(
+            "SELECT id, first_name, last_name, email
+             FROM   contacts
+             WHERE  organization_id = :orgId
+               AND  is_active = TRUE
+             ORDER BY COALESCE( NULLIF( TRIM( first_name || ' ' || last_name ), '' ), email )
+             LIMIT " & int( arguments.limit ),
+            { orgId : arguments.organizationId }
+        );
+        return toAccountList( rows, "contact" );
+    }
+
+    /**
+     * Combined picker list scoped to one org. Agents come first
+     * (provider-side first-class accounts), then contacts. Both
+     * groups individually capped at `limit`; the combined list is
+     * not capped beyond that.
+     */
+    public array function listForOrganization(
+        required string organizationId,
+        numeric limit = variables.DEFAULT_LIMIT
+    ){
+        var out = listAgents( arguments.limit );
+        var contacts = listContactsForOrganization( arguments.organizationId, arguments.limit );
+        for ( var c in contacts ) out.append( c );
+        return out;
+    }
+
+    /**
+     * Single-account label resolver. Used by per-row label rendering
+     * in lists where we already have a (type,id) pair but no name.
+     * Falls back to "type:short-id" when the lookup fails so callers
+     * never get a null.
+     */
+    public string function accountLabel( required string accountType, required string accountId ){
+        if ( !len( arguments.accountId ) ) return "(unassigned)";
+        var table = arguments.accountType == "agent" ? "agents" : "contacts";
+        try {
+            var rows = queryExecute(
+                "SELECT first_name, last_name, email FROM " & table & " WHERE id = :id",
+                { id : arguments.accountId }
+            );
+            if ( !rows.recordCount ) return arguments.accountType & ":" & left( arguments.accountId, 8 );
+            return composeLabel(
+                rows.first_name[ 1 ] ?: "",
+                rows.last_name[ 1 ]  ?: "",
+                rows.email[ 1 ]      ?: "",
+                arguments.accountType,
+                arguments.accountId
+            );
+        } catch ( any e ) {
+            return arguments.accountType & ":" & left( arguments.accountId, 8 );
+        }
+    }
+
+    // ---------- internals ----------
+
+    private array function toAccountList( required query rows, required string type ){
+        var out = [];
+        for ( var i = 1; i <= arguments.rows.recordCount; i++ ) {
+            var first = arguments.rows.first_name[ i ] ?: "";
+            var last  = arguments.rows.last_name[ i ]  ?: "";
+            var email = arguments.rows.email[ i ]      ?: "";
+            var id    = arguments.rows.id[ i ];
+            out.append( {
+                id    : id,
+                label : composeLabel( first, last, email, arguments.type, id ),
+                email : email,
+                type  : arguments.type
+            } );
+        }
+        return out;
+    }
+
+    private string function composeLabel(
+        required string firstName,
+        required string lastName,
+        required string email,
+        required string accountType,
+        required string accountId
+    ){
+        var name = trim( arguments.firstName & " " & arguments.lastName );
+        if ( len( name ) && len( arguments.email ) ) return name & " (" & arguments.email & ")";
+        if ( len( name ) ) return name;
+        if ( len( arguments.email ) ) return arguments.email;
+        return arguments.accountType & ":" & left( arguments.accountId, 8 );
+    }
+
+}
