@@ -6,6 +6,12 @@ Pre-1.0 development happens directly on `main`. Phases are tracked here as `[Unr
 
 ## [Unreleased]
 
+### Project + subtask notifications (email audit R8)
+
+- **`PmNotificationDispatcher` now fans out project and subtask lifecycle events.** Added `onPmProjectCreated`, `onPmProjectArchived`, `onPmSubtaskCreated`, and `onPmSubtaskCompleted` handlers. Project events notify the project's watchers; subtask events notify the parent task's watchers (the audience that already follows the task, since subtasks rarely carry their own watcher list). The acting user is always excluded, matching the existing task handlers. New private helpers: `projectWatcherDispatch`, `subtaskWatcherDispatch`, `loadProjectRow`, `loadSubtaskRow`, `projectContext`, `subtaskContext`. The four interception points were already declared in `ModuleConfig.bx` and announced (sync) by `ProjectService` / `SubtaskService`; only the dispatch and templates were missing.
+- **14 new notification templates** in `ModuleConfig.bx`: `project_created` and `project_archived` (inapp + email, agent + contact), `subtask_completed` (inapp + email, agent + contact), and `subtask_created` (inapp only, both families, to keep email noise down, mirroring `task_status_changed`). Project links resolve to `/agent/pm/projects/{{projectId}}` and `/pm/projects/{{projectId}}`; subtask links point at the parent task detail page.
+- **InstallSpec** extended with a "registers notificationTemplates for project + subtask events" assertion covering all 14 tuples.
+
 ### Phase 13d: Release Prep (docs + ForgeBox-ready)
 
 - **README rewrite.** Replaced the pre-1.0 scaffold note with a feature inventory table (Agent / Portal / Admin / AI / API / Automation / Notifications) and added a Configuration section documenting the per-tenant `pm.default-template-id` setting, the env vars PM reads (`AI_ENABLED`, `AI_EMBEDDING_MODEL`, `SCHEDULER_MODE`), and the six roles PM ships through the host's role registry. Status line updated to "v1.0.0 release prep."

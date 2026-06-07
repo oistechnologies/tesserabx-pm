@@ -584,6 +584,112 @@ class {
                         bodyTemplate  : "Your task {{taskTitle}} in {{projectName}} was due {{dueDate}} and remains open. Open: {{appBaseUrl}}/pm/tasks/{{taskId}}",
                         linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
                         placeholders  : [ "taskTitle", "projectName", "dueDate", "taskId" ]
+                    },
+
+                    // ----- project created (R8: fans out to project watchers) -----
+                    {
+                        eventKey : "tesserabx-pm.project_created", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{actorLabel}} created {{projectName}}",
+                        bodyTemplate  : "A new project you watch was created.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.project_created", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] New project: {{projectName}}",
+                        bodyTemplate  : "{{actorLabel}} created the project {{projectName}}. Open it: {{appBaseUrl}}/agent/pm/projects/{{projectId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.project_created", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "New project: {{projectName}}",
+                        bodyTemplate  : "{{actorLabel}} created a project you watch.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.project_created", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] New project: {{projectName}}",
+                        bodyTemplate  : "{{actorLabel}} created the project {{projectName}}. Open it: {{appBaseUrl}}/pm/projects/{{projectId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+
+                    // ----- project archived (R8: fans out to project watchers) -----
+                    {
+                        eventKey : "tesserabx-pm.project_archived", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "{{projectName}} archived",
+                        bodyTemplate  : "{{actorLabel}} archived this project.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.project_archived", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] {{projectName}} archived",
+                        bodyTemplate  : "{{actorLabel}} archived the project {{projectName}}. {{appBaseUrl}}/agent/pm/projects/{{projectId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.project_archived", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "{{projectName}} archived",
+                        bodyTemplate  : "{{actorLabel}} archived this project.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.project_archived", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] {{projectName}} archived",
+                        bodyTemplate  : "{{actorLabel}} archived the project {{projectName}}. {{appBaseUrl}}/pm/projects/{{projectId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/projects/{{projectId}}",
+                        placeholders  : [ "actorLabel", "projectName", "projectId" ]
+                    },
+
+                    // ----- subtask created (R8: parent-task watchers, inapp only to keep email noise down) -----
+                    {
+                        eventKey : "tesserabx-pm.subtask_created", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "New subtask on {{taskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} added the subtask {{subtaskTitle}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "subtaskTitle", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.subtask_created", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "New subtask on {{taskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} added the subtask {{subtaskTitle}} in {{projectName}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "subtaskTitle", "taskTitle", "projectName", "taskId" ]
+                    },
+
+                    // ----- subtask completed (R8: parent-task watchers) -----
+                    {
+                        eventKey : "tesserabx-pm.subtask_completed", channel : "inapp", recipientType : "agent",
+                        titleTemplate : "Subtask complete: {{subtaskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} completed {{subtaskTitle}} on {{taskTitle}}.",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "subtaskTitle", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.subtask_completed", channel : "email", recipientType : "agent",
+                        titleTemplate : "[PM] Subtask complete: {{subtaskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} completed the subtask {{subtaskTitle}} on {{taskTitle}} ({{projectName}}). {{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/agent/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "subtaskTitle", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.subtask_completed", channel : "inapp", recipientType : "contact",
+                        titleTemplate : "Subtask complete: {{subtaskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} completed {{subtaskTitle}} on {{taskTitle}}.",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "subtaskTitle", "taskTitle", "projectName", "taskId" ]
+                    },
+                    {
+                        eventKey : "tesserabx-pm.subtask_completed", channel : "email", recipientType : "contact",
+                        titleTemplate : "[PM] Subtask complete: {{subtaskTitle}}",
+                        bodyTemplate  : "{{actorLabel}} completed the subtask {{subtaskTitle}} on {{taskTitle}} ({{projectName}}). {{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        linkTemplate  : "{{appBaseUrl}}/pm/tasks/{{taskId}}",
+                        placeholders  : [ "actorLabel", "subtaskTitle", "taskTitle", "projectName", "taskId" ]
                     }
                 ],
 
