@@ -477,6 +477,29 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( registry.findTemplate( "tesserabx-pm.task_overdue",  "email", "contact" ) ).notToBeNull();
             } );
 
+            // ---- Email audit R8: project + subtask lifecycle templates.
+
+            it( "registers notificationTemplates for project + subtask events", function(){
+                var registry = variables.wb.getInstance( "NotificationTemplateRegistry@notifications" );
+                // project_created + project_archived: inapp + email, both families.
+                expect( registry.findTemplate( "tesserabx-pm.project_created",   "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_created",   "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_created",   "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_created",   "email", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_archived",  "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_archived",  "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_archived",  "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.project_archived",  "email", "contact" ) ).notToBeNull();
+                // subtask_created is inapp-only (no email, to keep noise down).
+                expect( registry.findTemplate( "tesserabx-pm.subtask_created",   "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.subtask_created",   "inapp", "contact" ) ).notToBeNull();
+                // subtask_completed: inapp + email, both families.
+                expect( registry.findTemplate( "tesserabx-pm.subtask_completed", "inapp", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.subtask_completed", "email", "agent"   ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.subtask_completed", "inapp", "contact" ) ).notToBeNull();
+                expect( registry.findTemplate( "tesserabx-pm.subtask_completed", "email", "contact" ) ).notToBeNull();
+            } );
+
             // ---- Phase 10b: cross-project view + saved filters.
 
             it( "binds SavedFilterService@tesserabx-pm in WireBox", function(){

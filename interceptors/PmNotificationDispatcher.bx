@@ -125,6 +125,18 @@ class {
     function onPmTaskDueSoon( event, interceptData, rc, prc ){ taskAssigneeDispatch( "tesserabx-pm.task_due_soon", arguments.interceptData ); }
     function onPmTaskOverdue( event, interceptData, rc, prc ){ taskAssigneeDispatch( "tesserabx-pm.task_overdue",  arguments.interceptData ); }
 
+    /**
+     * Project + subtask lifecycle (email audit R8). Project events fan
+     * out to the project's watchers; subtask events fan out to the
+     * parent task's watchers (the audience that already follows the
+     * task, since subtasks rarely carry their own watcher list). The
+     * acting user is always excluded, mirroring the task handlers.
+     */
+    function onPmProjectCreated(   event, interceptData, rc, prc ){ projectWatcherDispatch( "tesserabx-pm.project_created",   arguments.interceptData ); }
+    function onPmProjectArchived(  event, interceptData, rc, prc ){ projectWatcherDispatch( "tesserabx-pm.project_archived",  arguments.interceptData ); }
+    function onPmSubtaskCreated(   event, interceptData, rc, prc ){ subtaskWatcherDispatch( "tesserabx-pm.subtask_created",   arguments.interceptData ); }
+    function onPmSubtaskCompleted( event, interceptData, rc, prc ){ subtaskWatcherDispatch( "tesserabx-pm.subtask_completed", arguments.interceptData ); }
+
     private void function taskAssigneeDispatch( required string eventKey, required struct envelope ){
         try {
             var e        = arguments.envelope;
@@ -168,6 +180,64 @@ class {
             );
         } catch ( any e ) {
             log( "taskWatcherDispatch[" & arguments.eventKey & "]", e.message );
+        }
+    }
+
+    /**
+     * Project event fan-out: every watcher of the project, minus the
+     * actor. No project-member auto-watcher exists, so only explicit
+     * project watchers hear about it.
+     */
+    private void function projectWatcherDispatch( required string eventKey, required struct envelope ){
+        try {
+            var e         = arguments.envelope;
+            var projectId = e.entity.id ?: "";
+            if ( !len( projectId ) ) return;
+
+            var recipients = watchersExcept( "project", projectId, e.actorType ?: "", e.actorId ?: "" );
+            if ( !arrayLen( recipients ) ) return;
+
+            var project = loadProjectRow( projectId );
+            if ( !project.recordCount ) return;
+
+            notifications().dispatchForEvent(
+                eventKey   : arguments.eventKey,
+                recipients : recipients,
+                context    : projectContext( project, e )
+            );
+        } catch ( any e ) {
+            log( "projectWatcherDispatch[" & arguments.eventKey & "]", e.message );
+        }
+    }
+
+    /**
+     * Subtask event fan-out: the watchers of the PARENT TASK, minus the
+     * actor. Subtasks belong to a task, and the people following the
+     * task are the meaningful audience for "a subtask changed"; the
+     * notification links back to the parent task detail page.
+     */
+    private void function subtaskWatcherDispatch( required string eventKey, required struct envelope ){
+        try {
+            var e         = arguments.envelope;
+            var subtaskId = e.entity.id ?: "";
+            if ( !len( subtaskId ) ) return;
+
+            var subtask = loadSubtaskRow( subtaskId );
+            if ( !subtask.recordCount ) return;
+
+            var parentTaskId = subtask.task_id[ 1 ] ?: "";
+            if ( !len( parentTaskId ) ) return;
+
+            var recipients = watchersExcept( "task", parentTaskId, e.actorType ?: "", e.actorId ?: "" );
+            if ( !arrayLen( recipients ) ) return;
+
+            notifications().dispatchForEvent(
+                eventKey   : arguments.eventKey,
+                recipients : recipients,
+                context    : subtaskContext( subtask, e )
+            );
+        } catch ( any e ) {
+            log( "subtaskWatcherDispatch[" & arguments.eventKey & "]", e.message );
         }
     }
 
@@ -271,6 +341,44 @@ class {
              WHERE  t.id = :id",
             { id : arguments.taskId }
         );
+    }
+
+    private query function loadProjectRow( required string projectId ){
+        return queryExecute(
+            "SELECT id, name FROM pm_projects WHERE id = :id",
+            { id : arguments.projectId }
+        );
+    }
+
+    private query function loadSubtaskRow( required string subtaskId ){
+        return queryExecute(
+            "SELECT s.id, s.title, s.task_id,
+                    t.title AS task_title, t.project_id,
+                    p.name  AS project_name
+             FROM   pm_subtasks s
+             LEFT JOIN pm_tasks    t ON t.id = s.task_id
+             LEFT JOIN pm_projects p ON p.id = t.project_id
+             WHERE  s.id = :id",
+            { id : arguments.subtaskId }
+        );
+    }
+
+    private struct function projectContext( required query projectRow, required struct envelope ){
+        var ctx = baseActorContext( arguments.envelope );
+        ctx.projectId   = arguments.projectRow.id[ 1 ];
+        ctx.projectName = arguments.projectRow.name[ 1 ] ?: "";
+        return ctx;
+    }
+
+    private struct function subtaskContext( required query subtaskRow, required struct envelope ){
+        var ctx = baseActorContext( arguments.envelope );
+        ctx.subtaskId    = arguments.subtaskRow.id[ 1 ];
+        ctx.subtaskTitle = arguments.subtaskRow.title[ 1 ];
+        ctx.taskId       = arguments.subtaskRow.task_id[ 1 ]      ?: "";
+        ctx.taskTitle    = arguments.subtaskRow.task_title[ 1 ]   ?: "";
+        ctx.projectId    = arguments.subtaskRow.project_id[ 1 ]   ?: "";
+        ctx.projectName  = arguments.subtaskRow.project_name[ 1 ] ?: "";
+        return ctx;
     }
 
     private any function notifications(){
